@@ -21,7 +21,7 @@ The project uses Python, the OpenAI API (`gpt-4.1`), pandas, DuckDB, SciPy, scik
 .
 ├── AI Agent requirements.txt   # Original challenge brief
 ├── README.md                   # This guide
-├── .env.example                # Safe template for local configuration
+├── .env                        # Safe template for local configuration
 ├── .gitignore                  # Excludes keys, local memory, and generated files
 ├── requirements.txt            # Pinned Python packages
 ├── core.py                     # Startup, model/tool loop, and terminal chat
