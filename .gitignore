@@ -1,0 +1,15 @@
+# Sensitive keys
+.env
+
+# Python junk
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Output folder for generated charts
+output/*.png
+
+# Persistent memory state 
+agent_memory.json

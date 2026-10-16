@@ -1,0 +1,40 @@
+4 Core Requirements
+The Agentic Task [Basic]
+
+Optional track. Build a data analysis agent that accepts a tabular dataset and natural language questions, then uses its own tools to analyse the data and answer accurately. We are interested in how you learn, experiment, build something that works, and explain your decisions, not a perfect product. External resources and LLMs are fine; clearly describe your own contribution.
+Concept & Inspiration
+
+Choose any suitable tabular dataset and demonstrate real analysis. The system should not be hard-coded for one dataset; evaluators may try their own data and questions.
+Accepted Stacks:
+Any reasonable APIs, open models, and development stack
+Core Requirements
+
+    Provide at least five genuinely different tools for the agent. Five wrappers around the same operation do not count; choose tools that perform distinct, useful kinds of analysis.
+    Show the agent using its tools to answer questions about a tabular dataset, rather than returning generic model-generated responses.
+    Make the system work with suitable datasets beyond one hard-coded example. Be ready to demonstrate it with new data and questions.
+    You may use APIs, open models, or any stack that makes sense. Clearly identify exactly what you used.
+
+★
+Optional Deep-Dive Missions
+
+These allow strong candidates to demonstrate architectural depth without making baseline evaluation unfair.
+✦
+Brownie points: Persistent memory
+
+Add useful memory across sessions. Do not simply save every chat message or dump whole datasets into a database. Memory should retain useful facts, retrieve them when relevant, and change the agent’s future responses. For example, remember what a metric or column means, a corrected fact, a preference for weekly rather than daily summaries, or a reusable named filter. If a user says “active customers” excludes cancelled accounts, the agent should remember and apply that definition next time. Thoughtful memory can decide what is worth keeping, update stale or incorrect facts, handle conflicts, and let users inspect or control what is remembered.
+What to submit
+
+    A public GitHub repository containing your code.
+    A README with setup instructions and a short explanation of the tools you built and, if attempted, your memory design.
+    A short demo video and/or deployed link is optional, but very much preferred.
+
+What we will look for
+
+    Whether the agent actually analyses data.
+    Whether the tools are genuinely different and used sensibly.
+    If you attempt memory: whether it persists, is retrieved when relevant, and affects later work.
+    Whether you can run and explain your implementation.
+
+A note on generic wrappers
+
+Please do not submit a generic Gemini wrapper. There is plenty of room for exploration and creativity, especially in persistent memory. We are looking forward to seeing what you build.
