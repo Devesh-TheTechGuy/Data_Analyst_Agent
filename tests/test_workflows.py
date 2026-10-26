@@ -15,6 +15,7 @@ import datasets
 import memory
 import storage
 from tools import DATASET, _CON, _CON_LOCK, calculate, safe_sql_query
+from usage import UsageTracker
 
 
 class FakeClient:
@@ -94,13 +95,17 @@ class WorkflowTests(unittest.TestCase):
         sent = []
         def create(**kwargs):
             sent.append([dict(message) for message in kwargs["messages"]])
-            return SimpleNamespace(choices=[SimpleNamespace(message=next(replies))])
+            n=len(sent)
+            return SimpleNamespace(choices=[SimpleNamespace(message=next(replies))], usage=SimpleNamespace(prompt_tokens=1500+n*100, completion_tokens=20, prompt_tokens_details=SimpleNamespace(cached_tokens=1024 if n==2 else 0)))
         fake = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
         with patch.object(core, "get_client", return_value=fake), patch.object(core.datasets, "sync"), patch.object(core.memory, "format_memory_for_prompt", return_value="None relevant."):
             result = core.run_agent("What is 2+2?")
         self.assertEqual(result["answer"], "The answer is 4.")
         self.assertEqual(result["activity"][1]["result"], "4")
         self.assertEqual(sent[1][-1]["content"], "4")
+        self.assertEqual(result["usage"]["input_tokens"], 3300)
+        self.assertEqual(result["usage"]["cached_tokens"], 1024)
+        self.assertEqual(result["usage"]["context_tokens"], 1700)
 
     def test_api_upload_memory_and_streamed_answer(self):
         with patch.dict(os.environ, {"APP_PASSWORD": "", "OPENAI_API_KEY": "test-only"}):
@@ -117,15 +122,21 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(client.get("/api/memories").json()[0]["value"], "n >= 1")
             chat_id = client.post("/api/chats", json={"title":"New analysis"}).json()["id"]
             step = {"label":"Calculating","tool":"calculate","arguments":{},"result":"2","error":False}
-            def fake_run(question, history, on_activity):
+            def fake_run(question, history, on_activity, **kwargs):
+                self.assertEqual(kwargs["api_key"], "sk-test-key")
                 on_activity(step)
-                return {"answer":"There are 2 rows.", "activity":[step]}
+                kwargs["usage_tracker"].add({"prompt_tokens":1000,"completion_tokens":30,"prompt_tokens_details":{"cached_tokens":128}}, context=True)
+                kwargs["on_usage"](kwargs["usage_tracker"].snapshot())
+                return {"answer":"There are 2 rows.", "activity":[step], "usage":kwargs["usage_tracker"].snapshot()}
             with patch.object(app.core, "run_agent", side_effect=fake_run), patch.object(app.memory, "auto_extract_and_save", return_value=[]):
-                response = client.post(f"/api/chats/{chat_id}/messages", json={"content":"Count rows"})
+                response = client.post(f"/api/chats/{chat_id}/messages", json={"content":"Count rows"}, headers={"X-OpenAI-API-Key":"sk-test-key"})
             self.assertEqual(response.status_code, 200)
             self.assertIn("event: activity", response.text)
+            self.assertIn("event: usage", response.text)
             self.assertIn("event: final", response.text)
-            self.assertEqual(len(client.get(f"/api/chats/{chat_id}").json()["messages"]), 2)
+            messages = client.get(f"/api/chats/{chat_id}").json()["messages"]
+            self.assertEqual(len(messages), 2)
+            self.assertEqual(messages[1]["usage"]["cached_tokens"], 128)
             self.assertEqual(client.delete(f"/api/memories/{memory_id}").status_code, 200)
             self.assertEqual(client.delete(f"/api/datasets/{upload['id']}").status_code, 200)
             payload = b"amount\n100\n200\n"
@@ -149,6 +160,14 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(calculate("sqrt(144) + 2"), "14.0")
         self.assertIn("Only arithmetic", calculate("().__class__"))
         self.assertIn("file system operations are disabled", safe_sql_query("SELECT * FROM read_csv_auto('secret.csv')").lower())
+
+    def test_usage_tracker_reports_cache_and_context(self):
+        tracker=UsageTracker()
+        tracker.add({"prompt_tokens":2400,"completion_tokens":100,"prompt_tokens_details":{"cached_tokens":1024}}, context=True)
+        tracker.add({"prompt_tokens":200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":0}})
+        self.assertEqual(tracker.snapshot()["input_tokens"],2600)
+        self.assertEqual(tracker.snapshot()["context_tokens"],2400)
+        self.assertEqual(tracker.snapshot()["cached_tokens"],1024)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ def remember(category, key, value, scope=""):
     return storage.upsert_memory(category, key, value, scope)
 
 
-def relevant_memories(question, client, dataset_names=(), limit=8):
+def relevant_memories(question, client, dataset_names=(), limit=8, usage_callback=None):
     """Let a small model select only memories useful to this question."""
     items = load_memory()
     if not items:
@@ -38,6 +38,8 @@ def relevant_memories(question, client, dataset_names=(), limit=8):
                 {"role": "user", "content": json.dumps({"question": question, "memories": selection})},
             ],
         )
+        if usage_callback:
+            usage_callback(getattr(response, "usage", None))
         ids = set(json.loads(response.choices[0].message.content).get("ids", []))
         return [m for m in candidates if m["id"] in ids][:limit]
     except Exception:
@@ -46,14 +48,14 @@ def relevant_memories(question, client, dataset_names=(), limit=8):
         return [m for m in ranked if words & set(re.findall(r"[a-z0-9]+", m["key"] + " " + m["value"]))][:limit]
 
 
-def format_memory_for_prompt(question="", client=None, dataset_names=()):
-    items = relevant_memories(question, client, dataset_names) if client else load_memory()
+def format_memory_for_prompt(question="", client=None, dataset_names=(), usage_callback=None):
+    items = relevant_memories(question, client, dataset_names, usage_callback=usage_callback) if client else load_memory()
     if not items:
         return "None relevant."
     return "\n".join(f"- [{m['category']}{': ' + m['scope'] if m['scope'] else ''}] {m['key']}: {m['value']}" for m in items)
 
 
-def auto_extract_and_save(history, client, dataset_names=()):
+def auto_extract_and_save(history, client, dataset_names=(), usage_callback=None):
     """Extract multiple durable facts from user context, including implicit facts and corrections."""
     existing = load_memory()
     try:
@@ -71,6 +73,8 @@ def auto_extract_and_save(history, client, dataset_names=()):
                 {"role": "user", "content": json.dumps({"recent_conversation": history[-16:], "existing_memories": existing, "datasets": list(dataset_names)}, default=str)},
             ],
         )
+        if usage_callback:
+            usage_callback(getattr(response, "usage", None))
         changes = json.loads(response.choices[0].message.content).get("changes", [])
     except Exception:
         logging.exception("Memory extraction failed")

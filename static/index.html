@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#e9edf6">
+  <meta name="theme-color" content="#080a0b">
   <title>Glassboard — Data Analyst</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -19,6 +20,7 @@
       <div class="sidebar-bottom">
         <button id="datasets-nav" class="side-action"><span class="side-icon">▤</span><span>Datasets</span><span id="dataset-count" class="count">0</span></button>
         <button id="memory-nav" class="side-action"><span class="side-icon">✧</span><span>Memory</span><span id="memory-count" class="count">0</span></button>
+        <button id="key-nav" class="side-action"><span class="side-icon">⌘</span><span>API key</span><span id="key-source" class="count">Server</span></button>
         <div class="sidebar-divider"></div>
         <div class="account-row"><div class="avatar">D</div><div class="account-copy"><strong>My workspace</strong><small>Data analyst</small></div><button id="logout" class="icon-button" title="Sign out" aria-label="Sign out">↪</button></div>
       </div>
@@ -28,7 +30,7 @@
       <header class="topbar glass">
         <button id="menu-toggle" class="icon-button mobile-only" aria-label="Open menu">☰</button>
         <div class="top-title"><strong id="current-title">New analysis</strong><span class="top-subtitle"><span class="online-dot"></span> Your AI data partner</span></div>
-        <div class="top-actions"><button id="thinking-toggle" class="top-pill" title="Show or hide all thinking steps">✦ Thinking</button><button id="top-datasets" class="top-pill">▤ <span id="top-dataset-count">0 datasets</span></button><button id="top-memory" class="icon-button top-memory" title="Edit memory" aria-label="Edit memory">✧</button></div>
+        <div class="top-actions"><button id="thinking-toggle" class="top-pill" title="Show or hide all thinking steps">✦ Thinking</button><button id="top-datasets" class="top-pill">▤ <span id="top-dataset-count">0 datasets</span></button><button id="top-memory" class="icon-button top-memory" title="Edit memory" aria-label="Edit memory">✧</button><button id="top-key" class="icon-button" title="API key settings" aria-label="API key settings">⌘</button></div>
       </header>
       <section id="conversation" class="conversation" aria-live="polite"></section>
       <div class="composer-wrap">
@@ -39,7 +41,7 @@
           <input id="file-input" type="file" hidden accept=".csv,.tsv,.txt,.xlsx,.xls,.xlsm,.ods,.json,.jsonl,.ndjson,.parquet,.feather">
           <button id="send" type="submit" class="send-button" aria-label="Send message">↑</button>
         </form>
-        <div class="composer-footer">Your analysis, grounded in your data <span>·</span> Files and memory stay in your workspace</div>
+        <div id="usage-bar" class="usage-bar" aria-label="Chat usage"><span class="usage-model" title="GPT-4.1 analyzes your questions; GPT-4.1-mini manages memory">✦ GPT-4.1</span><span id="usage-tokens" title="Total input and output tokens used in this chat, including memory calls">0 input · 0 output</span><span id="usage-context" title="Input tokens in the latest main model call against the GPT-4.1 context window">Context 0 / 1.05M</span><span id="usage-cache" title="Cached input tokens divided by total input tokens in this chat">Cache hit 0%</span></div>
       </div>
     </main>
   </div>
@@ -58,6 +60,11 @@
   <section id="memory-editor" class="modal editor glass hidden" role="dialog" aria-modal="true" aria-labelledby="editor-heading">
     <div class="modal-head"><div><div class="eyebrow">PERSONALIZE</div><h2 id="editor-heading">Add memory</h2></div><button class="modal-close icon-button" aria-label="Close">×</button></div>
     <form id="memory-form" class="memory-form"><label>Type<select id="memory-category"><option value="definition">Definition</option><option value="preference">Preference</option><option value="profile">Profile</option><option value="project">Project</option></select></label><label>What is this about?<input id="memory-key" required maxlength="120" placeholder="e.g. active customer"></label><label>What should I remember?<textarea id="memory-value" required maxlength="600" placeholder="e.g. A customer with an order in the last 30 days"></textarea></label><label>Dataset (optional)<select id="memory-scope"><option value="">All datasets</option></select></label><button class="form-submit" type="submit">Save memory</button></form>
+  </section>
+  <section id="key-modal" class="modal editor glass hidden" role="dialog" aria-modal="true" aria-labelledby="key-heading">
+    <div class="modal-head"><div><div class="eyebrow">MODEL SETTINGS</div><h2 id="key-heading">API key</h2><p>Use GPT-4.1 with the workspace key or your own OpenAI key.</p></div><button class="modal-close icon-button" aria-label="Close">×</button></div>
+    <div class="key-options"><button id="use-server-key" class="key-option"><strong>Workspace key</strong><small>Provided by this deployment</small></button><button id="use-personal-key" class="key-option"><strong>Your own key</strong><small>Private to this browser tab</small></button></div>
+    <form id="key-form" class="memory-form"><label>OpenAI API key<div class="secret-field"><input id="personal-key" type="password" autocomplete="off" placeholder="sk-..." aria-label="Your OpenAI API key"><button id="reveal-key" type="button" aria-label="Show or hide API key">◉</button></div></label><p class="key-note">Your key is kept in this tab’s session storage and sent to this app server only for your requests. The app does not save it in its database.</p><button class="form-submit" type="submit">Use my key</button><button id="clear-key" class="text-button" type="button">Remove my key</button></form>
   </section>
   <section id="login-screen" class="login-screen hidden"><div class="login-card glass"><div class="login-symbol">◈</div><div class="eyebrow">YOUR PRIVATE WORKSPACE</div><h1>Welcome back.</h1><p>Enter your workspace password to continue.</p><form id="login-form"><input id="password" type="password" placeholder="Password" required autocomplete="current-password"><button class="form-submit" type="submit">Continue →</button></form><small id="login-error"></small></div></section>
   <div id="toast" class="toast hidden" role="status"></div>

@@ -22,6 +22,7 @@ import datasets
 import memory
 import storage
 from tools import DATASET, SUPPORTED_EXTENSIONS
+from usage import UsageTracker
 
 app = FastAPI(title="Glassboard Data Analyst")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
@@ -198,26 +199,34 @@ class MessageBody(BaseModel):
 
 
 @app.post("/api/chats/{chat_id}/messages")
-def send_message(chat_id: str, body: MessageBody):
+def send_message(chat_id: str, body: MessageBody, request: Request):
     chat = storage.get_chat(chat_id)
     if not chat:
         raise HTTPException(404, "Chat not found")
-    if not (os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API")):
-        raise HTTPException(503, "Set OPENAI_API_KEY to enable chat")
+    personal_key = request.headers.get("X-OpenAI-API-Key", "").strip()
+    if len(personal_key) > 500:
+        raise HTTPException(400, "API key is too long")
+    if not (personal_key or os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API")):
+        raise HTTPException(503, "Add your API key in Settings or set OPENAI_API_KEY on the server")
     previous = [{"role": m["role"], "content": m["content"]} for m in chat["messages"]]
     question = body.content.strip()
     storage.add_message(chat_id, "user", question)
     if chat["title"] == "New analysis":
         storage.rename_chat(chat_id, question.splitlines()[0][:70])
     events = queue.Queue()
+    tracker = UsageTracker()
 
     def worker():
         try:
-            result = core.run_agent(question, previous, on_activity=lambda step: events.put(("activity", step)))
-            answer = storage.add_message(chat_id, "assistant", result["answer"], result["activity"])
+            result = core.run_agent(question, previous, on_activity=lambda step: events.put(("activity", step)),
+                                    on_usage=lambda snap: events.put(("usage", snap)), api_key=personal_key or None,
+                                    usage_tracker=tracker)
+            answer = storage.add_message(chat_id, "assistant", result["answer"], result["activity"], tracker.snapshot())
             events.put(("final", answer))
             history = previous + [{"role": "user", "content": question}, {"role": "assistant", "content": result["answer"]}]
-            learned = memory.auto_extract_and_save(history, core.get_client(), list(DATASET))
+            learned = memory.auto_extract_and_save(history, core.get_client(personal_key or None), list(DATASET), usage_callback=tracker.add)
+            storage.update_message_usage(answer["id"], tracker.snapshot())
+            events.put(("usage", tracker.snapshot()))
             if learned:
                 events.put(("memory", {"count": len(learned)}))
         except Exception as exc:

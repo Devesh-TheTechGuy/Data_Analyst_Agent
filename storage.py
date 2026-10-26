@@ -60,7 +60,13 @@ def init():
         blob = "BYTEA" if DATABASE_URL else "BLOB"
         with connection() as con:
             sql(con, "CREATE TABLE IF NOT EXISTS chats (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
-            sql(con, "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, activity_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL)")
+            sql(con, "CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, chat_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, activity_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, usage_json TEXT NOT NULL DEFAULT '{}')")
+            if DATABASE_URL:
+                columns = {row["column_name"] for row in rows(sql(con, "SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='messages'"))}
+            else:
+                columns = {row["name"] for row in rows(sql(con, "PRAGMA table_info(messages)"))}
+            if "usage_json" not in columns:
+                sql(con, "ALTER TABLE messages ADD COLUMN usage_json TEXT NOT NULL DEFAULT '{}'")
             sql(con, "CREATE INDEX IF NOT EXISTS messages_chat_idx ON messages(chat_id, created_at)")
             sql(con, "CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, category TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
             sql(con, "CREATE UNIQUE INDEX IF NOT EXISTS memories_key_idx ON memories(category, key, scope)")
@@ -114,6 +120,7 @@ def get_chat(chat_id):
         messages = rows(sql(con, "SELECT * FROM messages WHERE chat_id=? ORDER BY created_at, id", (chat_id,)))
     for message in messages:
         message["activity"] = json.loads(message.pop("activity_json"))
+        message["usage"] = json.loads(message.pop("usage_json"))
     return {**dict(chat), "messages": messages}
 
 
@@ -130,16 +137,24 @@ def delete_chat(chat_id):
         return sql(con, "DELETE FROM chats WHERE id=?", (chat_id,)).rowcount > 0
 
 
-def add_message(chat_id, role, content, activity=None):
+def add_message(chat_id, role, content, activity=None, usage=None):
     init()
     item = {"id": uid(), "chat_id": chat_id, "role": role, "content": content,
-            "activity_json": json.dumps(activity or []), "created_at": now()}
+            "activity_json": json.dumps(activity or []), "created_at": now(), "usage_json": json.dumps(usage or {})}
     with connection() as con:
-        sql(con, "INSERT INTO messages VALUES (?, ?, ?, ?, ?, ?)", tuple(item.values()))
+        sql(con, "INSERT INTO messages (id, chat_id, role, content, activity_json, created_at, usage_json) VALUES (?, ?, ?, ?, ?, ?, ?)", tuple(item.values()))
         sql(con, "UPDATE chats SET updated_at=? WHERE id=?", (now(), chat_id))
     item["activity"] = activity or []
+    item["usage"] = usage or {}
     item.pop("activity_json")
+    item.pop("usage_json")
     return item
+
+
+def update_message_usage(message_id, usage):
+    init()
+    with connection() as con:
+        sql(con, "UPDATE messages SET usage_json=? WHERE id=?", (json.dumps(usage), message_id))
 
 
 def list_memories():
