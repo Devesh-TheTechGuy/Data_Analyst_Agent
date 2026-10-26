@@ -105,7 +105,10 @@ def calculate(expression: str) -> str:
                     raise ValueError("Exponent is too large")
                 return allowed_ops[type(node.op)](left, right)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in functions and not node.keywords:
-                return functions[node.func.id](*(evaluate(arg) for arg in node.args))
+                args = [evaluate(arg) for arg in node.args]
+                if node.func.id in {"factorial", "comb", "perm", "isqrt"} and any(abs(value) > 10000 for value in args):
+                    raise ValueError("Math argument is too large")
+                return functions[node.func.id](*args)
             raise ValueError("Only arithmetic and math functions are allowed")
 
         result = evaluate(ast.parse(expression, mode="eval"))

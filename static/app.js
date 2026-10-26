@@ -26,10 +26,20 @@ function markdown(source) {
   const lines = String(source || '').replace(/\r/g,'').split('\n');
   let out = '', list = '', code = false, codeLines = [];
   const endList = () => { if (list) { out += `</${list}>`; list = ''; } };
-  for (const line of lines) {
+  for (let i=0;i<lines.length;i++) { const line=lines[i];
     if (line.startsWith('```')) { endList(); if (code) { out += `<pre><code>${esc(codeLines.join('\n'))}</code></pre>`; codeLines=[]; } code=!code; continue; }
     if (code) { codeLines.push(line); continue; }
     if (!line.trim()) { endList(); continue; }
+    const separator=lines[i+1]?.trim();
+    if (line.includes('|') && separator?.includes('-') && /^[|:\-\s]+$/.test(separator)) {
+      endList();
+      const cells=row=>row.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(x=>inline(x.trim()));
+      out+='<table><thead><tr>'+cells(line).map(x=>`<th>${x}</th>`).join('')+'</tr></thead><tbody>';
+      i++;
+      while (i+1<lines.length && lines[i+1].includes('|') && lines[i+1].trim()) {i++;out+='<tr>'+cells(lines[i]).map(x=>`<td>${x}</td>`).join('')+'</tr>';}
+      out+='</tbody></table>';
+      continue;
+    }
     const heading = line.match(/^(#{1,3})\s+(.+)/);
     if (heading) { endList(); const n = heading[1].length; out += `<h${n}>${inline(heading[2])}</h${n}>`; continue; }
     const bullet = line.match(/^\s*[-*]\s+(.+)/), numbered = line.match(/^\s*\d+\.\s+(.+)/);
@@ -89,7 +99,8 @@ function renderMessage(message) {
 function renderThinking(article, activity) {
   const slot=article.querySelector('.thinking-slot'); if (!slot) return;
   if (!activity.length) {slot.innerHTML='';return;}
-  slot.innerHTML=`<details class="thinking" ${state.thinkingOpen?'open':''}><summary>✦ Thinking <span>· ${activity.length} step${activity.length===1?'':'s'}</span></summary><div class="thinking-list">${activity.map(step=>`<div class="thinking-step ${step.error?'error':''}"><span class="thinking-dot">✧</span><div><strong>${esc(step.label)}</strong><span>${esc(step.result||'')}</span></div></div>`).join('')}</div></details>`;
+  const describe=step=>step.tool==='sql_query'?step.arguments?.query:(step.arguments?.name||step.arguments?.expression||'');
+  slot.innerHTML=`<details class="thinking" ${state.thinkingOpen?'open':''}><summary>✦ Thinking <span>· ${activity.length} step${activity.length===1?'':'s'}</span></summary><div class="thinking-list">${activity.map(step=>`<div class="thinking-step ${step.error?'error':''}"><span class="thinking-dot">✧</span><div><strong>${esc(step.label)}</strong>${describe(step)?`<span class="step-arguments">${esc(describe(step))}</span>`:''}<span>${esc(step.result||'')}</span></div></div>`).join('')}</div></details>`;
   slot.querySelector('details').addEventListener('toggle',e=>{state.thinkingOpen=e.target.open;localStorage.setItem('thinkingOpen',String(state.thinkingOpen));});
 }
 function setBusy(value){state.busy=value;$('send').disabled=value;$('prompt').disabled=value;$('upload-trigger').disabled=value;$('send').textContent=value?'···':'↑';}
