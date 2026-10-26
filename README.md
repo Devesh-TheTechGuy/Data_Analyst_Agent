@@ -96,7 +96,7 @@ app.py             FastAPI routes, sign-in, uploads, and streamed chat events
 core.py            GPT-4.1 tool loop and terminal chat
 datasets.py        Automatic folder discovery and uploaded dataset loading
 memory.py          Automatic memory updates and relevant recall
-storage.py         SQLite locally or Postgres on Railway
+storage.py         SQLite locally or Postgres online
 tools.py           Tabular file readers and the seven analysis tools
 json_schema.py     Tool definitions sent to the model
 usage.py           Token, context, and cache accounting
@@ -109,16 +109,58 @@ I wrote the tool loop, data loading, tool schemas, memory flow, storage layer, a
 
 The web app is a **single shared workspace** protected by `APP_PASSWORD`. It does not have separate user accounts. A signed browser cookie tracks the 10-prompt allowance for the workspace key. Clearing browser data creates a new browser identity, so this is a practical usage limit rather than a separate account system. A personal OpenAI key stays in the current browser tab's session storage, is sent through the app server for the request, and is not saved in the app database. The workspace API key stays on the server and is never displayed or sent to the browser.
 
-## Deploy on Railway
+## Why I split the website across Vercel and Render
 
-The repository includes [railway.json](railway.json) to start the FastAPI server. To deploy it:
+The browser interface is plain HTML, CSS, and JavaScript. It can be served as static files without installing pandas or running Python. The analysis API needs Python, the data libraries, OpenAI calls, and a database. I put those jobs on separate hosts:
 
-1. Create a Railway project from this GitHub repository.
-2. Add a PostgreSQL service. In the app service, add a reference variable named `DATABASE_URL` pointing to the Postgres service's `DATABASE_URL`. The database keeps chats, memories, uploads, charts, and prompt counts across deploys.
-3. Set `APP_PASSWORD` in the app service. Set `OPENAI_API_KEY` if you want to provide 10 workspace prompts per browser; otherwise, visitors can enter their own key in the app. `SESSION_SECRET` is an optional separate secret for signing cookies.
-4. Generate a public domain from the app service's Networking settings. Open `/api/status` to check setup, then sign in and try an upload.
+| Part | Where it runs | Why |
+| --- | --- | --- |
+| Chat interface | Vercel | Serves the small static files quickly. I can change the layout without turning the browser into a Python app. |
+| Analysis API | Render | Runs FastAPI, GPT-4.1 tool calls, dataset readers, chart generation, and memory updates. |
+| Saved data | PostgreSQL | Keeps chats, uploads, memories, charts, and prompt counts when the API restarts. |
 
-Files added to `data/` in the repository appear after a redeploy. For a live deployment, the browser uploader is the way to add a dataset immediately. Keep `.env`, database credentials, and API keys out of Git.
+The frontend calls `/api/...` on its own Vercel address. A Vercel rewrite forwards that path to the Render API. This keeps requests on one browser origin, so sign-in cookies and the upload button work in the same way as they do locally. The OpenAI workspace key belongs in Render's private environment settings; it never belongs in the frontend files or Vercel's static output.
+
+```mermaid
+flowchart LR
+    U[Browser] -->|HTML, CSS, JS| V[Vercel frontend]
+    U -->|/api requests via Vercel| R[Render FastAPI]
+    R --> P[(PostgreSQL)]
+    R --> O[OpenAI GPT-4.1]
+    R --> T[Python analysis tools]
+```
+
+I kept the same web files in `static/` for local development. FastAPI serves them locally; Vercel publishes them for the hosted site. The Python API stays one codebase in both places. I used CSS and small, dependency-free JavaScript for the interface so the frontend is easy to inspect and adjust.
+
+## Deploy the same setup
+
+The hosting services read this GitHub repository. I use Python 3.12, which is pinned in [.python-version](.python-version), and keep credentials out of Git. The order matters: get the Render API address first, then point Vercel's `/api` rewrite at it.
+
+### 1. Prepare the database
+
+Create a PostgreSQL database and copy its private connection URL. The online app needs this because Render's local filesystem does not keep uploaded files or SQLite data across restarts. Set the URL as `DATABASE_URL` on the Render web service. The app creates its tables automatically on first use.
+
+### 2. Deploy the Python API on Render
+
+1. In Render, choose **New → Web Service** and connect this GitHub repository. Give Render access to this repo if it asks.
+2. Choose the `main` branch and Python runtime. The build command is `pip install -r requirements.txt`; the start command is `uvicorn app:app --host 0.0.0.0 --port $PORT`. [render.yaml](render.yaml) records these settings.
+3. Set `DATABASE_URL` and a private `APP_PASSWORD` in the service's Environment page. Set `OPENAI_API_KEY` there if you want to offer the ten shared prompts. `SESSION_SECRET` can be set to a separate random value for cookie signing.
+4. Deploy and open `https://YOUR-RENDER-URL/api/status`. It should say `"ready": true`. The service's root page also works, but I use the Vercel address as the public site.
+
+The server never returns the workspace API key to the browser. If it is missing, users can still enter their own key in the app. The API requires a database and workspace password in production so it will not quietly start with temporary local state.
+
+### 3. Deploy the frontend on Vercel
+
+1. Put the actual Render URL in the `/api/:path*` rewrite in [vercel.json](vercel.json), commit it, and push it to GitHub. The other rewrite maps `/static/...` assets to Vercel's published static directory.
+2. In Vercel, import the same GitHub repository as a project. Use the **Other** framework preset. The output directory is `static`, as recorded in `vercel.json`; Vercel publishes `index.html`, CSS, JavaScript, and the favicon.
+3. Deploy and open the Vercel URL. The browser talks to Vercel, Vercel forwards API requests to Render, and Render reads and writes PostgreSQL. No OpenAI key is needed in Vercel's environment settings.
+4. Check sign-in, one dataset upload, a question, Thinking steps, saved chat, memory editing, and the usage bar. Open the page at phone width too.
+
+Files committed to `data/` appear online after a redeploy. For an immediate new dataset, use the plus button in the browser. The live site may need a moment to start if the Render service has been idle. Keep `.env`, database credentials, passwords, and API keys out of Git.
+
+## If I were building this again
+
+I would start with one working data tool and make the model use its returned result. Then I would add file discovery and stable dataset names, the remaining tools, and tests for bad file types and unsafe queries. After that I would add persistent chats and memory, with a separate memory selection step so old context is used only when it helps. Finally I would build the chat interface, expose token usage from actual API responses, and split the static frontend from the Python backend for deployment. That order kept each change testable before I added the next part.
 
 ## Checks and next steps
 

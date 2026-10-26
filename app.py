@@ -1,4 +1,4 @@
-"""FastAPI entrypoint for local use and Railway."""
+"""FastAPI entrypoint for local use and Render."""
 
 import hashlib
 import hmac
@@ -30,7 +30,7 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
 def is_production():
-    return bool(os.getenv("RAILWAY_PROJECT_ID"))
+    return os.getenv("RENDER") == "true"
 
 
 def configured():

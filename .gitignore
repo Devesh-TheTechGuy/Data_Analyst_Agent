@@ -14,5 +14,6 @@ output/*.png
 # Persistent memory state 
 agent_memory.json
 app_state.sqlite3
+.vercel/
 # Local datasets added by the user (tracked example CSVs remain tracked)
 data/*
