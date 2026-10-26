@@ -58,9 +58,8 @@ function markdown(source) {
 
 function renderChats() {
   const query = $('chat-search').value.trim().toLowerCase();
-  $('chat-list').innerHTML = state.chats.filter(c => c.title.toLowerCase().includes(query)).map(c => `<div class="chat-item ${c.id===state.chatId?'active':''}" data-id="${esc(c.id)}" role="button" tabindex="0" aria-label="Open ${esc(c.title)}" ${c.id===state.chatId?'aria-current="page"':''}><span class="chat-icon">${icon('chart')}</span><span class="chat-name">${esc(c.title)}</span><button class="chat-more" data-more="${esc(c.id)}" aria-label="Options for ${esc(c.title)}">•••</button></div>`).join('') || '<div class="empty-note">No conversations yet</div>';
-  $('chat-list').querySelectorAll('.chat-item').forEach(el => el.addEventListener('click', e => { if (!e.target.closest('.chat-more')) openChat(el.dataset.id); }));
-  $('chat-list').querySelectorAll('.chat-item').forEach(el => el.addEventListener('keydown', e => { if ((e.key==='Enter'||e.key===' ') && !e.target.closest('.chat-more')) { e.preventDefault(); openChat(el.dataset.id); } }));
+  $('chat-list').innerHTML = state.chats.filter(c => c.title.toLowerCase().includes(query)).map(c => `<div class="chat-item ${c.id===state.chatId?'active':''}"><button class="chat-open" data-id="${esc(c.id)}" aria-label="Open ${esc(c.title)}" ${c.id===state.chatId?'aria-current="page"':''}><span class="chat-icon">${icon('chart')}</span><span class="chat-name">${esc(c.title)}</span></button><button class="chat-more" data-more="${esc(c.id)}" aria-label="Options for ${esc(c.title)}">•••</button></div>`).join('') || '<div class="empty-note">No conversations yet</div>';
+  $('chat-list').querySelectorAll('.chat-open').forEach(el => el.addEventListener('click', () => openChat(el.dataset.id)));
   $('chat-list').querySelectorAll('.chat-more').forEach(el => el.addEventListener('click', e => { e.stopPropagation(); chatMenu(el.dataset.more, el); }));
 }
 function actionDialog({title,description,confirmText,inputValue,destructive=false}) {
@@ -84,7 +83,7 @@ function chatMenu(id, anchor) {
   document.querySelector('.context-menu')?.remove();
   const menu = document.createElement('div'); menu.className = 'context-menu glass';
   menu.innerHTML = '<button data-action="rename">✎ Rename</button><button data-action="delete">⌫ Delete</button>';
-  const rect = anchor.getBoundingClientRect(); menu.style.left = `${Math.min(rect.left-120, innerWidth-150)}px`; menu.style.top = `${rect.bottom+5}px`;
+  const rect = anchor.getBoundingClientRect(); menu.style.left = `${Math.max(8,Math.min(rect.right-130, innerWidth-145))}px`; menu.style.top = `${rect.bottom+5}px`;
   document.body.append(menu);
   menu.addEventListener('click', async e => {
     const action=e.target.dataset.action; menu.remove(); if (!action) return;
@@ -234,7 +233,7 @@ $('clear-key').onclick=()=>{state.personalKey='';state.keyMode='server';sessionS
 $('logout').onclick=async()=>{sessionStorage.removeItem('glassboardApiKey');sessionStorage.removeItem('glassboardKeyMode');await api('/api/auth/logout',{method:'POST'}).catch(()=>{});location.reload();};
 $('thinking-toggle').onclick=()=>{state.thinkingOpen=!state.thinkingOpen;localStorage.setItem('thinkingOpen',String(state.thinkingOpen));document.querySelectorAll('.thinking').forEach(el=>el.open=state.thinkingOpen);updateThinkingToggle();toast(state.thinkingOpen?'Thinking steps shown':'Thinking steps hidden');};
 $('menu-toggle').onclick=()=>{$('sidebar').classList.add('open');$('mobile-backdrop').classList.add('open');};$('mobile-backdrop').onclick=closeSidebar;
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeModal();closeSidebar();}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();newChat();}if(e.key==='Tab'&&state.modal&&!$('action-dialog').open){const items=[...$(state.modal).querySelectorAll('button,input,textarea,select,[tabindex]')].filter(el=>!el.disabled&&el.getClientRects().length);if(items.length){const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('action-dialog').open){closeModal();closeSidebar();}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();newChat();}if(e.key==='Tab'&&state.modal&&!$('action-dialog').open){const items=[...$(state.modal).querySelectorAll('button,input,textarea,select,[tabindex]')].filter(el=>!el.disabled&&el.getClientRects().length);if(items.length){const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}});
 $('conversation').addEventListener('click',e=>{const button=e.target.closest('[data-prompt]');if(button)sendMessage(button.dataset.prompt);if(e.target.closest('[data-upload]'))$('file-input').click();});
 updateThinkingToggle();
 initialize();

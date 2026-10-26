@@ -75,6 +75,20 @@ Before a new answer, another pass chooses only memories relevant to that questio
 
 For example, if I say “An active customer means someone who ordered in the last 30 days,” that definition can be saved. A later question about active customers can use it. If I change the definition to 60 days, I can correct it in chat or edit the saved entry directly.
 
+## From a question to an answer
+
+```mermaid
+flowchart LR
+    A[Question] --> B[Find relevant memory]
+    B --> C[GPT-4.1]
+    C -->|Calls a tool| D[Python analysis tools]
+    D -->|Returns results| C
+    C -->|Final response| E[Answer and visible tool steps]
+    E --> F[Save useful user context]
+```
+
+The app loads the available dataset names before a question. The model can inspect a dataset, call another tool with the exact columns it found, and then answer from the returned results. The Thinking panel shows those visible steps. A separate memory pass runs after the answer, so saved context is ready for a later conversation.
+
 ## How the app is put together
 
 ```text
