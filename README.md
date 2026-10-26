@@ -149,13 +149,13 @@ This separate database matters because [Render's free web service filesystem is 
 1. In Render, choose **New → Web Service** and connect this GitHub repository. Give Render access to this repo if it asks.
 2. Choose the `main` branch and Python runtime. The build command is `pip install -r requirements.txt`; the start command is `uvicorn app:app --host 0.0.0.0 --port $PORT`. [render.yaml](render.yaml) records these settings.
 3. Set `DATABASE_URL` and a private `APP_PASSWORD` in the service's Environment page. Set `OPENAI_API_KEY` there if you want to offer the ten shared prompts. `SESSION_SECRET` can be set to a separate random value for cookie signing.
-4. Deploy and open `https://YOUR-RENDER-URL/api/status`. It should say `"ready": true`. The service's root page also works, but I use the Vercel address as the public site.
+4. Deploy and open [the API status page](https://byte-into-data-api.onrender.com/api/status). It should say `"ready": true`. My Render service is named `byte-into-data-api`. The service's root page also works, but I use the Vercel address as the public site.
 
 The server never returns the workspace API key to the browser. If it is missing, users can still enter their own key in the app. The API requires a database and workspace password in production so it will not quietly start with temporary local state.
 
 ### 3. Deploy the frontend on Vercel
 
-1. Put the actual Render URL in the `/api/:path*` rewrite in [vercel.json](vercel.json), commit it, and push it to GitHub. The other rewrite maps `/static/...` assets to Vercel's published static directory.
+1. Put the actual Render URL in the `/api/:path*` rewrite in [vercel.json](vercel.json), commit it, and push it to GitHub. Mine forwards `/api/...` to `https://byte-into-data-api.onrender.com/api/...`. The other rewrite maps `/static/...` assets to Vercel's published static directory.
 2. In Vercel, import the same GitHub repository as a project. Use the **Other** framework preset. The output directory is `static`, as recorded in `vercel.json`; Vercel publishes `index.html`, CSS, JavaScript, and the favicon.
 3. Deploy and open the Vercel URL. The browser talks to Vercel, Vercel forwards API requests to Render, and Render reads and writes PostgreSQL. No OpenAI key is needed in Vercel's environment settings.
 4. Check sign-in, one dataset upload, a question, Thinking steps, saved chat, memory editing, and the usage bar. Open the page at phone width too.

@@ -3,6 +3,10 @@
   "outputDirectory": "static",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://byte-into-data-api.onrender.com/api/:path*"
+    },
+    {
       "source": "/static/:path*",
       "destination": "/:path*"
     }
