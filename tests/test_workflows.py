@@ -158,6 +158,16 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(client.post("/api/auth/login", json={"password":"test-password"}).status_code, 200)
             self.assertEqual(client.get("/api/chats").status_code, 200)
 
+    def test_chat_errors_do_not_expose_provider_details(self):
+        with patch.dict(os.environ, {"APP_PASSWORD": "", "OPENAI_API_KEY": "owner-test-secret"}):
+            client = TestClient(app.app)
+            chat_id = client.post("/api/chats", json={"title": "New analysis"}).json()["id"]
+            with patch.object(app.core, "run_agent", side_effect=RuntimeError("sk-private-example-key")):
+                response = client.post(f"/api/chats/{chat_id}/messages", json={"content": "Analyze"})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("event: error", response.text)
+            self.assertNotIn("sk-private-example-key", response.text)
+
     def test_render_requires_persistent_storage_and_password(self):
         with patch.dict(os.environ, {"RENDER":"true", "APP_PASSWORD":""}):
             with patch.object(app.storage, "DATABASE_URL", None):

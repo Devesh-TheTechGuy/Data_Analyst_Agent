@@ -43,6 +43,18 @@ def configured():
     return missing
 
 
+def public_chat_error(exc):
+    """Keep provider and server exception details out of the browser stream."""
+    name = type(exc).__name__
+    if name == "AuthenticationError":
+        return "OpenAI rejected the API key. Check the key in Settings."
+    if name == "RateLimitError":
+        return "OpenAI is rate limiting requests. Wait a moment and try again."
+    if name in {"APIConnectionError", "APITimeoutError"}:
+        return "Could not reach OpenAI. Please try again."
+    return "The analysis could not finish. Please try again."
+
+
 def session_token():
     secret = os.getenv("SESSION_SECRET") or os.getenv("APP_PASSWORD", "local-only")
     payload = b"byte-session-v1:" + os.getenv("APP_PASSWORD", "").encode()
@@ -265,7 +277,7 @@ def send_message(chat_id: str, body: MessageBody, request: Request):
             if learned:
                 events.put(("memory", {"count": len(learned)}))
         except Exception as exc:
-            events.put(("error", {"message": str(exc)}))
+            events.put(("error", {"message": public_chat_error(exc)}))
         finally:
             events.put(None)
 
