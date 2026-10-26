@@ -151,7 +151,9 @@ class WorkflowTests(unittest.TestCase):
         with patch.dict(os.environ, {"APP_PASSWORD":"test-password", "SESSION_SECRET":"test-secret"}):
             client = TestClient(app.app)
             self.assertFalse(client.get("/api/status").json()["authenticated"])
+            self.assertEqual(client.get("/api/status").headers["cache-control"], "private, no-store")
             self.assertEqual(client.get("/api/chats").status_code, 401)
+            self.assertEqual(client.get("/api/chats").headers["cache-control"], "private, no-store")
             self.assertEqual(client.post("/api/auth/login", json={"password":"wrong"}).status_code, 401)
             self.assertEqual(client.post("/api/auth/login", json={"password":"test-password"}).status_code, 200)
             self.assertEqual(client.get("/api/chats").status_code, 200)

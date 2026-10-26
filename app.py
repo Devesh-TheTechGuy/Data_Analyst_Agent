@@ -74,10 +74,14 @@ async def guard(request: Request, call_next):
     request.state.device_id = device_id
     if request.url.path.startswith("/api/") and request.url.path not in {"/api/status", "/api/auth/login"}:
         if configured():
-            return JSONResponse({"detail": "Server setup required: " + ", ".join(configured())}, status_code=503)
+            return JSONResponse({"detail": "Server setup required: " + ", ".join(configured())}, status_code=503,
+                                headers={"Cache-Control": "private, no-store"})
         if not is_authenticated(request):
-            return JSONResponse({"detail": "Sign in to continue"}, status_code=401)
+            return JSONResponse({"detail": "Sign in to continue"}, status_code=401,
+                                headers={"Cache-Control": "private, no-store"})
     response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "private, no-store"
     if new_cookie:
         response.set_cookie("byte_device", new_cookie, httponly=True, secure=is_production(),
                             samesite="lax", max_age=60 * 60 * 24 * 365)
