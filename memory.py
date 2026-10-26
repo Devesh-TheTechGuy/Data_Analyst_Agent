@@ -1,90 +1,100 @@
-import os
+"""Automatic, user editable long term memory with relevance selection."""
+
 import json
+import logging
+import re
 
-MEMORY_FILE = "agent_memory.json"
+import storage
 
-def load_memory() -> dict:
-    """Loads saved definitions and preferences from disk."""
-    if os.path.exists(MEMORY_FILE):
-        try:
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"definitions": {}, "preferences": {}}
+KINDS = {"definition", "preference", "profile", "project"}
 
-def save_memory(data: dict):
-    """Saves memory back to disk."""
-    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
 
-def remember(category: str, key: str, value: str) -> str:
-    """
-    Saves a definition or preference.
-    """
-    mem = load_memory()
-    if category not in mem:
-        mem[category] = {}
-    mem[category][key.strip().lower()] = value.strip()
-    save_memory(mem)
-    return f"Remembered: '{key}' in {category}."
+def load_memory():
+    return storage.list_memories()
 
-def format_memory_for_prompt() -> str:
-    """Formats saved memory to be injected into the system prompt."""
-    mem = load_memory()
-    if not mem.get("definitions") and not mem.get("preferences"):
-        return "None."
-    
-    lines = []
-    if mem.get("definitions"):
-        lines.append("Domain Definitions:")
-        for k, v in mem["definitions"].items():
-            lines.append(f"- '{k}': {v}")
-    if mem.get("preferences"):
-        lines.append("User Preferences:")
-        for k, v in mem["preferences"].items():
-            lines.append(f"- '{k}': {v}")
-    return "\n".join(lines)
 
-def auto_extract_and_save(user_msg: str, assistant_msg: str, client) -> None:
-    """
-    Silently extracts business rules, definitions, or preferences or anything that is told by the user to remember
-    from the conversation turn and saves them to agent_memory.json.
-    """
-    extraction_prompt = f"""You are a memory manager for a data analysis agent.
-Analyze this conversation turn and determine if the user established any reusable domain definition, column meaning, custom metric filter, or preference.
+def remember(category, key, value, scope=""):
+    if category not in KINDS:
+        raise ValueError("Unsupported memory category")
+    return storage.upsert_memory(category, key, value, scope)
 
-Examples of things to save:
-- "Active users means logins in the last 30 days > 0" -> category: "definitions", key: "active users", value: "logins_last_30d > 0"
-- "Churned means status = 'cancelled'" -> category: "definitions", key: "churned", value: "status == 'cancelled'"
-- "Always round currency to 2 decimals" -> category: "preferences", key: "currency_rounding", value: "2 decimals"
 
-Conversation turn:
-User: {user_msg}
-Assistant: {assistant_msg}
-
-Instructions:
-If a reusable rule/definition was mentioned, return JSON:
-{{"found": true, "category": "definitions", "key": "exact term", "value": "concise rule"}}
-If NO rules/definitions were established (just normal questions like 'what is the mean age?'), return:
-{{"found": false}}
-Return RAW JSON ONLY.
-"""
+def relevant_memories(question, client, dataset_names=(), limit=8):
+    """Let a small model select only memories useful to this question."""
+    items = load_memory()
+    if not items:
+        return []
+    question_lower = question.lower()
+    mentioned = [name for name in dataset_names if name.lower() in question_lower]
+    candidates = [m for m in items if not m["scope"] or not mentioned or m["scope"] in mentioned]
+    if not candidates:
+        return []
+    selection = [{"id": m["id"], "category": m["category"], "key": m["key"], "value": m["value"], "scope": m["scope"]} for m in candidates]
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[{"role": "user", "content": extraction_prompt}],
-            response_format={"type": "json_object"},
-            temperature=0.0
+            model="gpt-4.1-mini", temperature=0, response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": "Select only saved user memories that directly help answer the current question. A memory may be useful by meaning even without exact word overlap. Do not select unrelated facts. Return JSON {\"ids\": [ids]} with at most 8 IDs."},
+                {"role": "user", "content": json.dumps({"question": question, "memories": selection})},
+            ],
         )
-        data = json.loads(response.choices[0].message.content)
-        if data.get("found"):
-            cat = data.get("category", "definitions")
-            key = data.get("key")
-            val = data.get("value")
-            if key and val:
-                remember(cat, key, val)
-                print(f"\n🧠 [Persistent Memory Updated]: Remembered '{key}' -> {val}")
+        ids = set(json.loads(response.choices[0].message.content).get("ids", []))
+        return [m for m in candidates if m["id"] in ids][:limit]
     except Exception:
-        # Memory extraction should fail silently and never crash the main chat
-        pass
+        words = set(re.findall(r"[a-z0-9]+", question_lower))
+        ranked = sorted(candidates, key=lambda m: len(words & set(re.findall(r"[a-z0-9]+", m["key"] + " " + m["value"]))), reverse=True)
+        return [m for m in ranked if words & set(re.findall(r"[a-z0-9]+", m["key"] + " " + m["value"]))][:limit]
+
+
+def format_memory_for_prompt(question="", client=None, dataset_names=()):
+    items = relevant_memories(question, client, dataset_names) if client else load_memory()
+    if not items:
+        return "None relevant."
+    return "\n".join(f"- [{m['category']}{': ' + m['scope'] if m['scope'] else ''}] {m['key']}: {m['value']}" for m in items)
+
+
+def auto_extract_and_save(history, client, dataset_names=()):
+    """Extract multiple durable facts from user context, including implicit facts and corrections."""
+    existing = load_memory()
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini", temperature=0, response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": (
+                    "You manage long term memory for a data analysis assistant. Read the conversation context, especially the latest user message. "
+                    "Keep stable, reusable facts learned from the user: definitions, column meanings, named filters, preferences, personal/project context. "
+                    "The user need not say 'remember'. Save multiple facts when appropriate. Update corrected or conflicting facts. "
+                    "Never save raw datasets, temporary requests, ordinary questions, assistant guesses, secrets, passwords, or API keys. "
+                    "Return JSON {\"changes\":[{\"action\":\"upsert\"|\"delete\",\"id\":\"existing memory id if correcting or deleting, otherwise empty\",\"category\":\"definition\"|\"preference\"|\"profile\"|\"project\",\"key\":\"short canonical name\",\"value\":\"concise fact\",\"scope\":\"dataset name or empty string\"}]}. "
+                    "When a new user fact corrects an existing memory, use its id so the stale entry is replaced. Return an empty changes array when nothing is worth remembering."
+                )},
+                {"role": "user", "content": json.dumps({"recent_conversation": history[-16:], "existing_memories": existing, "datasets": list(dataset_names)}, default=str)},
+            ],
+        )
+        changes = json.loads(response.choices[0].message.content).get("changes", [])
+    except Exception:
+        logging.exception("Memory extraction failed")
+        return []
+    saved = []
+    for change in changes[:12]:
+        category = str(change.get("category", "")).lower()
+        key = str(change.get("key", "")).strip()
+        value = str(change.get("value", "")).strip()
+        scope = str(change.get("scope", "")).strip().lower()
+        if category not in KINDS or (not key and change.get("action") != "delete") or len(key) > 120 or len(value) > 600 or (scope and scope not in dataset_names):
+            continue
+        match = next((m for m in existing if m["id"] == change.get("id")), None)
+        if change.get("action") == "delete":
+            match = match or next((m for m in existing if (m["category"], m["key"], m["scope"]) == (category, key.lower(), scope)), None)
+            if match:
+                storage.delete_memory(match["id"])
+        elif change.get("action") == "upsert" and value:
+            try:
+                if match:
+                    storage.update_memory(match["id"], category, key, value, scope)
+                    saved.append(next(m for m in storage.list_memories() if m["id"] == match["id"]))
+                else:
+                    saved.append(remember(category, key, value, scope))
+            except (ValueError, StopIteration):
+                logging.exception("Could not save extracted memory")
+    return saved

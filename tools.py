@@ -11,9 +11,24 @@ from scipy import stats
 from scipy.stats import norm
 import duckdb
 import re
+import ast
+import operator
+import threading
+from pathlib import Path
+import tempfile
 
 DATASET = {}
 _CON = duckdb.connect(":memory:")
+_CON.execute("SET enable_external_access=false")
+_CON_LOCK = threading.RLock()
+
+
+SUPPORTED_EXTENSIONS = {".csv", ".tsv", ".txt", ".xlsx", ".xls", ".xlsm", ".ods", ".json", ".jsonl", ".ndjson", ".parquet", ".feather"}
+
+
+def dataset_name(filename: str) -> str:
+    name = re.sub(r"\W+", "_", Path(filename).stem.lower()).strip("_") or "data"
+    return f"d_{name}" if name[0].isdigit() else name
 
 
 def load_data(path: str, name: str = None) -> str:
@@ -30,31 +45,32 @@ def load_data(path: str, name: str = None) -> str:
 
     ext = os.path.splitext(path)[1].lower()
     if ext in (".csv", ".txt", ".tsv"):
-        sep = "\t" if ext == ".tsv" else ","
+        sep = "\t" if ext == ".tsv" else (None if ext == ".txt" else ",")
         try:
-            df = pd.read_csv(path, sep=sep)
+            df = pd.read_csv(path, sep=sep, engine="python" if sep is None else "c")
         except UnicodeDecodeError:              # Excel-exported CSVs are often not UTF-8
-            df = pd.read_csv(path, sep=sep, encoding="latin-1")
-    elif ext in (".xlsx", ".xls"):
+            df = pd.read_csv(path, sep=sep, encoding="latin-1", engine="python" if sep is None else "c")
+    elif ext in (".xlsx", ".xls", ".xlsm", ".ods"):
         df = pd.read_excel(path)
     elif ext == ".json":
         df = pd.read_json(path)
+    elif ext in (".jsonl", ".ndjson"):
+        df = pd.read_json(path, lines=True)
     elif ext == ".parquet":
         df = pd.read_parquet(path)
+    elif ext == ".feather":
+        df = pd.read_feather(path)
     else:
         raise ValueError(f"load_data: unsupported file type '{ext}' for '{path}'")
 
     if df.empty:
         raise ValueError(f"load_data: '{path}' has no rows.")
 
-    if not name:
-        name = os.path.splitext(os.path.basename(path))[0].lower()
-    name = re.sub(r"\W+", "_", str(name)).strip("_") or "data"
-    if name[0].isdigit():
-        name = "d_" + name                      # SQL table names cannot start with a digit
+    name = dataset_name(name or path)
 
-    DATASET[name] = df
-    _CON.register(name, df)                     # re-loading the same name simply replaces it
+    with _CON_LOCK:
+        DATASET[name] = df
+        _CON.register(name, df)                 # re-loading the same name simply replaces it
     return f"Loaded '{name}': {len(df):,} rows x {len(df.columns)} columns (from {path})"
 
 
@@ -64,19 +80,38 @@ def load_data(path: str, name: str = None) -> str:
 
 
 def calculate(expression: str) -> str:
-    import math
-    """
-    Evaluates any mathematical expression safely.
-    Examples: '2 + 2', '(15 * 3) / 2', 'sqrt(144)', '2 ** 8'
-    """
+    """Evaluate simple arithmetic and public math functions without eval()."""
     try:
-        allowed_name = {k:v for k, v in math.__dict__.items() if not k.startswith("__")} 
+        if len(expression) > 300:
+            raise ValueError("Expression is too long")
+        allowed_ops = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+                       ast.Div: operator.truediv, ast.Pow: operator.pow, ast.FloorDiv: operator.floordiv}
+        functions = {k: v for k, v in math.__dict__.items() if not k.startswith("_") and callable(v)}
+        constants = {"pi": math.pi, "e": math.e, "tau": math.tau}
 
-        result = (eval(expression, {"__builtins__":{}}, allowed_name))
+        def evaluate(node):
+            if isinstance(node, ast.Expression):
+                return evaluate(node.body)
+            if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+                return node.value
+            if isinstance(node, ast.Name) and node.id in constants:
+                return constants[node.id]
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+                value = evaluate(node.operand)
+                return value if isinstance(node.op, ast.UAdd) else -value
+            if isinstance(node, ast.BinOp) and type(node.op) in allowed_ops:
+                left, right = evaluate(node.left), evaluate(node.right)
+                if isinstance(node.op, ast.Pow) and abs(right) > 100:
+                    raise ValueError("Exponent is too large")
+                return allowed_ops[type(node.op)](left, right)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in functions and not node.keywords:
+                return functions[node.func.id](*(evaluate(arg) for arg in node.args))
+            raise ValueError("Only arithmetic and math functions are allowed")
+
+        result = evaluate(ast.parse(expression, mode="eval"))
         return str(result)
     except Exception as e:
         error = (f"Calculation error: {str(e)}")
-        print(error)
         return error
 
 
@@ -124,7 +159,8 @@ def safe_sql_query(query: str) -> str:
             return "Error: Only SELECT and WITH queries are allowed."
         if ";" in q:
             return "Error: Only ONE statement is allowed (remove the extra ';')."
-        result = _CON.execute(q).df()      # to df() converts the result of the query to a DataFrame
+        with _CON_LOCK:
+            result = _CON.execute(q).df()  # to df() converts the result of the query to a DataFrame
         if len(result) > 50:
             return result.head(50).to_string() + f"\n\nResult truncated. Total rows: {len(result)}"
         return result.to_string()
@@ -371,8 +407,10 @@ def visualize_data(name: str, chart_type: str, filename: str, x: str = None, y: 
             plt.title(title)
         plt.tight_layout()
 
-        os.makedirs("output", exist_ok=True)
-        out_path = os.path.join("output", filename)
+        output_dir = os.getenv("OUTPUT_DIR", os.path.join(tempfile.gettempdir(), "data_analyst_charts") if os.getenv("VERCEL") else "output")
+        os.makedirs(output_dir, exist_ok=True)
+        safe_filename = re.sub(r"[^a-zA-Z0-9_-]+", "_", Path(filename).stem).strip("_") or "chart"
+        out_path = os.path.join(output_dir, safe_filename + ".png")
         plt.savefig(out_path, dpi=150)
         plt.close()
         return f"Chart successfully saved to {out_path}."
