@@ -39,7 +39,7 @@ On macOS or Linux, create the environment with `python3 -m venv .venv`, install 
 
 ## Add a dataset
 
-Put a supported file into `data/` and refresh the Datasets list. The app also checks the folder before each question, so a new file does not need a code edit or server restart. The filename becomes a safe dataset and SQL table name: `Quarterly Sales.xlsx` becomes `quarterly_sales`. If two files produce the same name, the next one gets `_2`.
+Put a supported file into `data/` and the open web app picks it up within about 15 seconds. It also checks the folder before each question, so a new file does not need a code edit or server restart. The filename becomes a safe dataset and SQL table name: `Quarterly Sales.xlsx` becomes `quarterly_sales`. If two files produce the same name, the next one gets `_2`.
 
 The plus button in chat and the Datasets panel upload files into the app database. Supported formats are **CSV, TSV, TXT, XLSX, XLS, XLSM, ODS, JSON, JSONL, NDJSON, Parquet, and Feather**. Excel loading currently uses the first sheet. Browser uploads are limited to 50 MB and use chunks for larger requests.
 

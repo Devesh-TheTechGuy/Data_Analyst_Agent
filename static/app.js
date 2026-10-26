@@ -178,6 +178,15 @@ async function refreshDatasets() {
     if(!state.chatId)$('conversation').innerHTML=welcome();
   }catch(err){toast(err.message);}
 }
+async function pollDatasets() {
+  if (document.hidden || state.modal || state.busy || !$('login-screen').classList.contains('hidden')) return;
+  try {
+    const data = await api('/api/datasets');
+    const signature = items => items.map(d => `${d.id}:${d.name}:${d.rows}:${d.columns}`).join('|');
+    if (signature(data.datasets) !== signature(state.datasets)) await refreshDatasets();
+  } catch { /* The next manual refresh or poll can retry. */ }
+}
+setInterval(pollDatasets, 15000);
 async function uploadFile(file) {
   if(!file)return; $('attachment-hint').classList.remove('hidden');$('attachment-hint').textContent=`Uploading ${file.name}...`;
   try{let data;
