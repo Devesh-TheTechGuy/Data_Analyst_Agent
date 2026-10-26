@@ -96,7 +96,7 @@ app.py             FastAPI routes, sign-in, uploads, and streamed chat events
 core.py            GPT-4.1 tool loop and terminal chat
 datasets.py        Automatic folder discovery and uploaded dataset loading
 memory.py          Automatic memory updates and relevant recall
-storage.py         SQLite locally or Postgres on Vercel
+storage.py         SQLite locally or Postgres on Railway
 tools.py           Tabular file readers and the seven analysis tools
 json_schema.py     Tool definitions sent to the model
 usage.py           Token, context, and cache accounting
@@ -109,14 +109,14 @@ I wrote the tool loop, data loading, tool schemas, memory flow, storage layer, a
 
 The web app is a **single shared workspace** protected by `APP_PASSWORD`. It does not have separate user accounts. A signed browser cookie tracks the 10-prompt allowance for the workspace key. Clearing browser data creates a new browser identity, so this is a practical usage limit rather than a separate account system. A personal OpenAI key stays in the current browser tab's session storage, is sent through the app server for the request, and is not saved in the app database. The workspace API key stays on the server and is never displayed or sent to the browser.
 
-## Deploy on Vercel
+## Deploy on Railway
 
-The root `app.py` is the Vercel FastAPI entry point, and [vercel.json](vercel.json) contains the function settings. To deploy this repository:
+The repository includes [railway.json](railway.json) to start the FastAPI server. To deploy it:
 
-1. Import it into Vercel.
-2. Add a Postgres database and set `DATABASE_URL` (or `POSTGRES_URL`). Vercel functions need persistent storage for chats, memories, uploads, and charts.
-3. Set `APP_PASSWORD` and either `OPENAI_API_KEY` for a workspace key or use the personal key option in the app. `SESSION_SECRET` is an optional separate secret for signing the login cookie.
-4. Deploy, check `/api/status`, sign in, and try an upload.
+1. Create a Railway project from this GitHub repository.
+2. Add a PostgreSQL service. In the app service, add a reference variable named `DATABASE_URL` pointing to the Postgres service's `DATABASE_URL`. The database keeps chats, memories, uploads, charts, and prompt counts across deploys.
+3. Set `APP_PASSWORD` in the app service. Set `OPENAI_API_KEY` if you want to provide 10 workspace prompts per browser; otherwise, visitors can enter their own key in the app. `SESSION_SECRET` is an optional separate secret for signing cookies.
+4. Generate a public domain from the app service's Networking settings. Open `/api/status` to check setup, then sign in and try an upload.
 
 Files added to `data/` in the repository appear after a redeploy. For a live deployment, the browser uploader is the way to add a dataset immediately. Keep `.env`, database credentials, and API keys out of Git.
 

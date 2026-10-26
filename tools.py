@@ -410,7 +410,7 @@ def visualize_data(name: str, chart_type: str, filename: str, x: str = None, y: 
             plt.title(title)
         plt.tight_layout()
 
-        output_dir = os.getenv("OUTPUT_DIR", os.path.join(tempfile.gettempdir(), "data_analyst_charts") if os.getenv("VERCEL") else "output")
+        output_dir = os.getenv("OUTPUT_DIR", os.path.join(tempfile.gettempdir(), "data_analyst_charts") if os.getenv("RAILWAY_PROJECT_ID") else "output")
         os.makedirs(output_dir, exist_ok=True)
         safe_filename = re.sub(r"[^a-zA-Z0-9_-]+", "_", Path(filename).stem).strip("_") or "chart"
         out_path = os.path.join(output_dir, safe_filename + ".png")

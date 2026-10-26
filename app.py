@@ -1,4 +1,4 @@
-"""FastAPI entrypoint for local use and Vercel."""
+"""FastAPI entrypoint for local use and Railway."""
 
 import hashlib
 import hmac
@@ -29,9 +29,13 @@ app = FastAPI(title="BYTE into Data")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
+def is_production():
+    return bool(os.getenv("RAILWAY_PROJECT_ID"))
+
+
 def configured():
     missing = []
-    if os.getenv("VERCEL"):
+    if is_production():
         if not storage.DATABASE_URL:
             missing.append("DATABASE_URL")
         if not os.getenv("APP_PASSWORD"):
@@ -75,7 +79,7 @@ async def guard(request: Request, call_next):
             return JSONResponse({"detail": "Sign in to continue"}, status_code=401)
     response = await call_next(request)
     if new_cookie:
-        response.set_cookie("byte_device", new_cookie, httponly=True, secure=bool(os.getenv("VERCEL")),
+        response.set_cookie("byte_device", new_cookie, httponly=True, secure=is_production(),
                             samesite="lax", max_age=60 * 60 * 24 * 365)
     return response
 
@@ -101,7 +105,7 @@ def login(body: LoginBody, response: Response):
     expected = os.getenv("APP_PASSWORD")
     if configured() or not expected or not hmac.compare_digest(body.password, expected):
         raise HTTPException(401, "Incorrect password")
-    response.set_cookie("glassboard_session", session_token(), httponly=True, secure=bool(os.getenv("VERCEL")), samesite="lax", max_age=60 * 60 * 24 * 30)
+    response.set_cookie("glassboard_session", session_token(), httponly=True, secure=is_production(), samesite="lax", max_age=60 * 60 * 24 * 30)
     return {"ok": True}
 
 
@@ -120,7 +124,7 @@ def list_datasets():
 async def upload_dataset(file: UploadFile = File(...)):
     if Path(file.filename or "").suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise HTTPException(400, "Unsupported dataset format")
-    limit = 4 * 1024 * 1024 if os.getenv("VERCEL") else 25 * 1024 * 1024
+    limit = 25 * 1024 * 1024
     content = await file.read(limit + 1)
     if len(content) > limit:
         raise HTTPException(413, f"This upload exceeds the {limit // (1024 * 1024)} MB limit")

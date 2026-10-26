@@ -156,6 +156,20 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(client.post("/api/auth/login", json={"password":"test-password"}).status_code, 200)
             self.assertEqual(client.get("/api/chats").status_code, 200)
 
+    def test_railway_requires_persistent_storage_and_password(self):
+        with patch.dict(os.environ, {"RAILWAY_PROJECT_ID":"project-test", "APP_PASSWORD":""}):
+            with patch.object(app.storage, "DATABASE_URL", None):
+                client = TestClient(app.app)
+                status = client.get("/api/status").json()
+                self.assertEqual(status["missing"], ["DATABASE_URL", "APP_PASSWORD"])
+                self.assertEqual(client.get("/api/chats").status_code, 503)
+        with patch.dict(os.environ, {"RAILWAY_PROJECT_ID":"project-test", "APP_PASSWORD":"test-password"}):
+            with patch.object(app.storage, "DATABASE_URL", "postgresql://test-host/database"):
+                client = TestClient(app.app)
+                response = client.post("/api/auth/login", json={"password":"test-password"})
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("secure", response.headers["set-cookie"].lower())
+
     def test_workspace_key_has_ten_prompts_per_browser(self):
         with patch.dict(os.environ, {"APP_PASSWORD":"", "OPENAI_API_KEY":"owner-test-secret"}):
             client = TestClient(app.app)
