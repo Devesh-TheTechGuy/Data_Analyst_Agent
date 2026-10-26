@@ -67,7 +67,7 @@ def run_agent(prompt, convo_history=None, max_steps=10, on_activity=None, on_usa
         response = client.chat.completions.create(
             model="gpt-4.1", messages=messages,
             tools=tools_schema, tool_choice="auto", temperature=0,
-            parallel_tool_calls=False, prompt_cache_key="glassboard-analyst-v1",
+            parallel_tool_calls=False, prompt_cache_key="byte-into-data-analyst-v1",
         )
         track(getattr(response, "usage", None), context=True)
         assistant = response.choices[0].message

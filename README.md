@@ -117,7 +117,7 @@ The browser interface is plain HTML, CSS, and JavaScript. It can be served as st
 | --- | --- | --- |
 | Chat interface | Vercel | Serves the small static files quickly. I can change the layout without turning the browser into a Python app. |
 | Analysis API | Render | Runs FastAPI, GPT-4.1 tool calls, dataset readers, chart generation, and memory updates. |
-| Saved data | PostgreSQL | Keeps chats, uploads, memories, charts, and prompt counts when the API restarts. |
+| Saved data | Neon PostgreSQL | Keeps chats, uploads, memories, charts, and prompt counts when the API restarts. |
 
 The frontend calls `/api/...` on its own Vercel address. A Vercel rewrite forwards that path to the Render API. This keeps requests on one browser origin, so sign-in cookies and the upload button work in the same way as they do locally. The OpenAI workspace key belongs in Render's private environment settings; it never belongs in the frontend files or Vercel's static output.
 
@@ -125,7 +125,7 @@ The frontend calls `/api/...` on its own Vercel address. A Vercel rewrite forwar
 flowchart LR
     U[Browser] -->|HTML, CSS, JS| V[Vercel frontend]
     U -->|/api requests via Vercel| R[Render FastAPI]
-    R --> P[(PostgreSQL)]
+    R --> P[(Neon PostgreSQL)]
     R --> O[OpenAI GPT-4.1]
     R --> T[Python analysis tools]
 ```
@@ -138,7 +138,11 @@ The hosting services read this GitHub repository. I use Python 3.12, which is pi
 
 ### 1. Prepare the database
 
-Create a PostgreSQL database and copy its private connection URL. The online app needs this because Render's local filesystem does not keep uploaded files or SQLite data across restarts. Set the URL as `DATABASE_URL` on the Render web service. The app creates its tables automatically on first use.
+I used **Neon PostgreSQL** through the Vercel Marketplace. In Vercel, open **Marketplace → Neon → Install**. Select the personal workspace, create the free Neon account, choose a database region near the Render service, and select the **Free** plan. I named the resource `byte-into-data-db` and chose Portland because the Render service is in Oregon. Neon Auth and Realtime are off because this app has its own workspace password and does not use those features.
+
+After Neon provisions the database, skip **Connect a Project**. The Vercel project serves only public static files and does not need database credentials. In the Neon resource dashboard, copy the pooled PostgreSQL connection URL into Render's private `DATABASE_URL` setting. Do not put that URL in Git, `vercel.json`, or frontend JavaScript. The app creates its tables automatically on first use.
+
+This separate database matters because [Render's free web service filesystem is temporary](https://render.com/docs/free). A local SQLite file or uploaded file there disappears after a restart or redeploy. Neon keeps the uploaded datasets and saved conversations in PostgreSQL. The free Neon plan currently includes [1 GB storage and 100 CU-hours per project each month](https://neon.com/blog/neon-free-plan-1-gb-per-project); check the plan page if you repeat these steps later.
 
 ### 2. Deploy the Python API on Render
 
@@ -156,7 +160,7 @@ The server never returns the workspace API key to the browser. If it is missing,
 3. Deploy and open the Vercel URL. The browser talks to Vercel, Vercel forwards API requests to Render, and Render reads and writes PostgreSQL. No OpenAI key is needed in Vercel's environment settings.
 4. Check sign-in, one dataset upload, a question, Thinking steps, saved chat, memory editing, and the usage bar. Open the page at phone width too.
 
-Files committed to `data/` appear online after a redeploy. For an immediate new dataset, use the plus button in the browser. The live site may need a moment to start if the Render service has been idle. Keep `.env`, database credentials, passwords, and API keys out of Git.
+Files committed to `data/` appear online after a redeploy. For an immediate new dataset, use the plus button in the browser. A [free Render service sleeps after 15 minutes without traffic](https://render.com/docs/free), so the first request after a quiet period can take about a minute. Keep `.env`, database credentials, passwords, and API keys out of Git.
 
 ## If I were building this again
 

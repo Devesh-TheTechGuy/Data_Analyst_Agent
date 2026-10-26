@@ -45,13 +45,13 @@ def configured():
 
 def session_token():
     secret = os.getenv("SESSION_SECRET") or os.getenv("APP_PASSWORD", "local-only")
-    payload = b"glassboard-session-v1:" + os.getenv("APP_PASSWORD", "").encode()
+    payload = b"byte-session-v1:" + os.getenv("APP_PASSWORD", "").encode()
     return hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
 
 
 def is_authenticated(request):
     password = os.getenv("APP_PASSWORD")
-    return not password or hmac.compare_digest(request.cookies.get("glassboard_session", ""), session_token())
+    return not password or hmac.compare_digest(request.cookies.get("byte_session", ""), session_token())
 
 
 def browser_device(request):
@@ -109,13 +109,13 @@ def login(body: LoginBody, response: Response):
     expected = os.getenv("APP_PASSWORD")
     if configured() or not expected or not hmac.compare_digest(body.password, expected):
         raise HTTPException(401, "Incorrect password")
-    response.set_cookie("glassboard_session", session_token(), httponly=True, secure=is_production(), samesite="lax", max_age=60 * 60 * 24 * 30)
+    response.set_cookie("byte_session", session_token(), httponly=True, secure=is_production(), samesite="lax", max_age=60 * 60 * 24 * 30)
     return {"ok": True}
 
 
 @app.post("/api/auth/logout")
 def logout(response: Response):
-    response.delete_cookie("glassboard_session")
+    response.delete_cookie("byte_session")
     return {"ok": True}
 
 
