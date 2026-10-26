@@ -26,6 +26,17 @@
     <symbol id="icon-chart" viewBox="0 0 24 24"><path d="M4 19h16M6 16V9m6 7V5m6 11v-5"/></symbol>
     <symbol id="icon-shield" viewBox="0 0 24 24"><path d="M12 2 20 5v6c0 5.5-3.2 9-8 11-4.8-2-8-5.5-8-11V5l8-3Z"/><path d="m8.5 12 2.2 2.2 4.8-4.8"/></symbol>
   </svg>
+  <section id="boot-screen" class="boot-screen" aria-live="polite">
+    <div class="boot-panel glass">
+      <div class="boot-brand"><span class="brand-icon"><svg class="ui-icon"><use href="#icon-logo"></use></svg></span><span>BYTE <em>into Data</em></span></div>
+      <div class="boot-preview" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      <div class="eyebrow">YOUR DATA WORKSPACE</div>
+      <h1 id="boot-title">Opening your workspace.</h1>
+      <p id="boot-message">Connecting to the analysis engine…</p>
+      <div class="boot-progress" role="progressbar" aria-label="Loading workspace"><span></span></div>
+      <button id="boot-retry" class="small-primary hidden" type="button">Try again</button>
+    </div>
+  </section>
   <div id="app" class="app-shell">
     <aside id="sidebar" class="sidebar glass">
       <div class="brand"><span class="brand-icon"><svg class="ui-icon"><use href="#icon-logo"></use></svg></span><span><strong>BYTE</strong> into Data<span class="brand-dot">.</span></span></div>
@@ -38,7 +49,7 @@
         <button id="memory-nav" class="side-action"><svg class="ui-icon"><use href="#icon-memory"></use></svg><span>Memory</span><span id="memory-count" class="count">0</span></button>
         <button id="key-nav" class="side-action"><svg class="ui-icon"><use href="#icon-key"></use></svg><span>API key</span><span id="key-source" class="count">Server</span></button>
         <div class="sidebar-divider"></div>
-        <div class="account-row"><div class="avatar">D</div><div class="account-copy"><strong>My workspace</strong><small>Private analysis</small></div><button id="logout" class="icon-button" title="Sign out" aria-label="Sign out"><svg class="ui-icon"><use href="#icon-log-out"></use></svg></button></div>
+        <div class="account-row"><div class="avatar">B</div><div class="account-copy"><strong>Your workspace</strong><small>Saved in this browser</small></div><button id="logout" class="icon-button" title="Sign out" aria-label="Sign out"><svg class="ui-icon"><use href="#icon-log-out"></use></svg></button></div>
       </div>
     </aside>
     <div id="mobile-backdrop" class="mobile-backdrop"></div>

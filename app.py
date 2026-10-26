@@ -7,6 +7,7 @@ import os
 import queue
 import secrets
 import threading
+import contextvars
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -33,12 +34,18 @@ def is_production():
     return os.getenv("RENDER") == "true"
 
 
+def public_access():
+    return os.getenv("PUBLIC_ACCESS", "true" if is_production() else "false").lower() == "true"
+
+
 def configured():
     missing = []
     if is_production():
         if not storage.DATABASE_URL:
             missing.append("DATABASE_URL")
-        if not os.getenv("APP_PASSWORD"):
+        if not (os.getenv("SESSION_SECRET") or os.getenv("APP_PASSWORD")):
+            missing.append("SESSION_SECRET or APP_PASSWORD")
+        if not public_access() and not os.getenv("APP_PASSWORD"):
             missing.append("APP_PASSWORD")
     return missing
 
@@ -62,6 +69,8 @@ def session_token():
 
 
 def is_authenticated(request):
+    if public_access():
+        return True
     password = os.getenv("APP_PASSWORD")
     return not password or hmac.compare_digest(request.cookies.get("byte_session", ""), session_token())
 
@@ -84,20 +93,22 @@ def browser_device(request):
 async def guard(request: Request, call_next):
     device_id, new_cookie = browser_device(request)
     request.state.device_id = device_id
-    if request.url.path.startswith("/api/") and request.url.path not in {"/api/status", "/api/auth/login"}:
-        if configured():
-            return JSONResponse({"detail": "Server setup required: " + ", ".join(configured())}, status_code=503,
-                                headers={"Cache-Control": "private, no-store"})
-        if not is_authenticated(request):
-            return JSONResponse({"detail": "Sign in to continue"}, status_code=401,
-                                headers={"Cache-Control": "private, no-store"})
-    response = await call_next(request)
-    if request.url.path.startswith("/api/"):
-        response.headers["Cache-Control"] = "private, no-store"
-    if new_cookie:
-        response.set_cookie("byte_device", new_cookie, httponly=True, secure=is_production(),
-                            samesite="lax", max_age=60 * 60 * 24 * 365)
-    return response
+    token = storage.set_owner(device_id)
+    try:
+        if request.url.path.startswith("/api/") and request.url.path not in {"/api/status", "/api/auth/login"} and configured():
+            response = JSONResponse({"detail": "Server setup required: " + ", ".join(configured())}, status_code=503)
+        elif request.url.path.startswith("/api/") and request.url.path not in {"/api/status", "/api/auth/login"} and not is_authenticated(request):
+            response = JSONResponse({"detail": "Sign in to continue"}, status_code=401)
+        else:
+            response = await call_next(request)
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "private, no-store"
+        if new_cookie:
+            response.set_cookie("byte_device", new_cookie, httponly=True, secure=is_production(),
+                                samesite="lax", max_age=60 * 60 * 24 * 365)
+        return response
+    finally:
+        storage.reset_owner(token)
 
 
 @app.get("/")
@@ -108,6 +119,7 @@ def home():
 @app.get("/api/status")
 def status(request: Request):
     return {"ready": not configured(), "missing": configured(), "authenticated": is_authenticated(request),
+            "public_access": public_access(),
             "chat_ready": bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API")),
             "workspace_quota": storage.workspace_quota(request.state.device_id) if not configured() else None}
 
@@ -118,6 +130,8 @@ class LoginBody(BaseModel):
 
 @app.post("/api/auth/login")
 def login(body: LoginBody, response: Response):
+    if public_access():
+        raise HTTPException(404, "Sign-in is disabled on the public site")
     expected = os.getenv("APP_PASSWORD")
     if configured() or not expected or not hmac.compare_digest(body.password, expected):
         raise HTTPException(401, "Incorrect password")
@@ -281,7 +295,8 @@ def send_message(chat_id: str, body: MessageBody, request: Request):
         finally:
             events.put(None)
 
-    threading.Thread(target=worker, daemon=True).start()
+    worker_context = contextvars.copy_context()
+    threading.Thread(target=lambda: worker_context.run(worker), daemon=True).start()
 
     def stream():
         while True:

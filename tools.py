@@ -16,11 +16,58 @@ import operator
 import threading
 from pathlib import Path
 import tempfile
+from collections.abc import MutableMapping
+from contextvars import ContextVar
 
-DATASET = {}
-_CON = duckdb.connect(":memory:")
-_CON.execute("SET enable_external_access=false")
+_LOCAL_DATASETS = {}
+_DATASETS_CONTEXT = ContextVar("byte_analysis_datasets", default=None)
+_LOCAL_CON = duckdb.connect(":memory:")
+_LOCAL_CON.execute("SET enable_external_access=false")
+_CON_CONTEXT = ContextVar("byte_analysis_connection", default=None)
 _CON_LOCK = threading.RLock()
+
+
+class DatasetView(MutableMapping):
+    """Use the current guest's tables, or the local CLI tables by default."""
+
+    def _data(self):
+        active = _DATASETS_CONTEXT.get()
+        return active if active is not None else _LOCAL_DATASETS
+
+    def __getitem__(self, key):
+        return self._data()[key]
+
+    def __setitem__(self, key, value):
+        self._data()[key] = value
+
+    def __delitem__(self, key):
+        del self._data()[key]
+
+    def __iter__(self):
+        return iter(self._data())
+
+    def __len__(self):
+        return len(self._data())
+
+
+class ConnectionView:
+    def __getattr__(self, name):
+        return getattr(_CON_CONTEXT.get() or _LOCAL_CON, name)
+
+
+DATASET = DatasetView()
+_CON = ConnectionView()
+
+
+def start_analysis_context():
+    """Give one guest request its own DuckDB tables and DataFrames."""
+    old = _CON_CONTEXT.get()
+    if old is not None:
+        old.close()
+    con = duckdb.connect(":memory:")
+    con.execute("SET enable_external_access=false")
+    _DATASETS_CONTEXT.set({})
+    _CON_CONTEXT.set(con)
 
 
 SUPPORTED_EXTENSIONS = {".csv", ".tsv", ".txt", ".xlsx", ".xls", ".xlsm", ".ods", ".json", ".jsonl", ".ndjson", ".parquet", ".feather"}

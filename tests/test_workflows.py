@@ -1,5 +1,7 @@
 import io
 import os
+import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -168,19 +170,81 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn("event: error", response.text)
             self.assertNotIn("sk-private-example-key", response.text)
 
-    def test_render_requires_persistent_storage_and_password(self):
+    def test_render_requires_persistent_storage_and_cookie_secret(self):
         with patch.dict(os.environ, {"RENDER":"true", "APP_PASSWORD":""}):
             with patch.object(app.storage, "DATABASE_URL", None):
                 client = TestClient(app.app)
                 status = client.get("/api/status").json()
-                self.assertEqual(status["missing"], ["DATABASE_URL", "APP_PASSWORD"])
+                self.assertEqual(status["missing"], ["DATABASE_URL", "SESSION_SECRET or APP_PASSWORD"])
                 self.assertEqual(client.get("/api/chats").status_code, 503)
         with patch.dict(os.environ, {"RENDER":"true", "APP_PASSWORD":"test-password"}):
             with patch.object(app.storage, "DATABASE_URL", "postgresql://test-host/database"):
                 client = TestClient(app.app)
-                response = client.post("/api/auth/login", json={"password":"test-password"})
+                self.assertEqual(app.configured(), [])
+                response = client.get("/")
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("secure", response.headers["set-cookie"].lower())
+
+    def test_public_guests_have_separate_chats_uploads_and_memories(self):
+        with patch.dict(os.environ, {"PUBLIC_ACCESS":"true", "APP_PASSWORD":"cookie-secret", "OPENAI_API_KEY":"test-only"}):
+            first, second = TestClient(app.app), TestClient(app.app)
+            self.assertTrue(first.get("/api/status").json()["authenticated"])
+            self.assertTrue(second.get("/api/status").json()["authenticated"])
+            uploaded = first.post("/api/datasets", files={"file": ("private.csv", b"value\n17\n", "text/csv")}).json()
+            self.assertEqual(uploaded["name"], "private")
+            self.assertNotIn("private", [d["name"] for d in second.get("/api/datasets").json()["datasets"]])
+            self.assertEqual(second.delete(f"/api/datasets/{uploaded['id']}").status_code, 404)
+            other_upload = second.post("/api/datasets", files={"file": ("private.csv", b"value\n25\n", "text/csv")}).json()
+            self.assertEqual(other_upload["name"], "private")
+            own_chat = first.post("/api/chats", json={"title":"My analysis"}).json()["id"]
+            self.assertEqual(second.get(f"/api/chats/{own_chat}").status_code, 404)
+            self.assertEqual(second.delete(f"/api/chats/{own_chat}").status_code, 404)
+            self.assertNotIn(own_chat, [c["id"] for c in second.get("/api/chats").json()])
+            memory_id = first.post("/api/memories", json={"category":"preference", "key":"currency", "value":"INR"}).json()["id"]
+            self.assertEqual(second.get("/api/memories").json(), [])
+            self.assertEqual(second.delete(f"/api/memories/{memory_id}").status_code, 404)
+            session = first.post("/api/uploads/start", json={"filename":"more.csv", "size_bytes":8}).json()["id"]
+            self.assertEqual(second.put(f"/api/uploads/{session}/chunks/0", content=b"x\n1\n").status_code, 404)
+
+            def own_query(*args, **kwargs):
+                datasets.sync()
+                return {"answer": safe_sql_query("SELECT value FROM private"), "activity": [], "usage": {}}
+            with patch.object(app.core, "run_agent", side_effect=own_query), patch.object(app.memory, "auto_extract_and_save", return_value=[]):
+                first_result = first.post(f"/api/chats/{own_chat}/messages", json={"content":"Query"}, headers={"X-OpenAI-API-Key":"sk-test"})
+                self.assertEqual(first_result.status_code, 200)
+                self.assertIn("17", first.get(f"/api/chats/{own_chat}").json()["messages"][-1]["content"])
+                second_chat = second.post("/api/chats", json={"title":"Mine"}).json()["id"]
+                second_result = second.post(f"/api/chats/{second_chat}/messages", json={"content":"Query"}, headers={"X-OpenAI-API-Key":"sk-test"})
+                self.assertEqual(second_result.status_code, 200)
+                self.assertIn("25", second.get(f"/api/chats/{second_chat}").json()["messages"][-1]["content"])
+
+    def test_existing_database_migrates_to_private_guest_rows(self):
+        with closing(sqlite3.connect(storage.ROOT / "app_state.sqlite3")) as con, con:
+            con.execute("CREATE TABLE chats (id TEXT PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+            con.execute("INSERT INTO chats VALUES ('old-chat', 'Before guests', 'now', 'now')")
+            con.execute("CREATE TABLE memories (id TEXT PRIMARY KEY, category TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, scope TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)")
+            con.execute("CREATE UNIQUE INDEX memories_key_idx ON memories(category, key, scope)")
+            con.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, filename TEXT NOT NULL, content BLOB NOT NULL, created_at TEXT NOT NULL)")
+            con.execute("INSERT INTO datasets VALUES ('old-file', 'sample', 'sample.csv', ?, 'now')", (b"n\n1\n",))
+        storage.init()
+        self.assertEqual(storage.list_chats()[0]["id"], "old-chat")
+        self.assertEqual(storage.list_uploads()[0]["name"], "sample")
+        token = storage.set_owner("guest-a")
+        try:
+            self.assertEqual(storage.list_chats(), [])
+            self.assertEqual(storage.list_uploads(), [])
+            storage.upsert_memory("preference", "currency", "INR")
+            storage.save_upload("sample", "sample.csv", b"n\n2\n")
+        finally:
+            storage.reset_owner(token)
+        token = storage.set_owner("guest-b")
+        try:
+            storage.upsert_memory("preference", "currency", "USD")
+            storage.save_upload("sample", "sample.csv", b"n\n3\n")
+            self.assertEqual(storage.list_memories()[0]["value"], "USD")
+            self.assertEqual(storage.list_uploads()[0]["name"], "sample")
+        finally:
+            storage.reset_owner(token)
 
     def test_workspace_key_has_ten_prompts_per_browser(self):
         with patch.dict(os.environ, {"APP_PASSWORD":"", "OPENAI_API_KEY":"owner-test-secret"}):

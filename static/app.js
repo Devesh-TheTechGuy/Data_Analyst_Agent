@@ -1,16 +1,32 @@
 const $ = (id) => document.getElementById(id);
-const state = { chatId: null, chats: [], datasets: [], memories: [], busy: false, modal: null, editingMemory: null, thinkingOpen: localStorage.getItem('thinkingOpen') === 'true', personalKey: sessionStorage.getItem('byteApiKey')||'', keyMode: sessionStorage.getItem('byteKeyMode')||'server', serverKeyReady: false, currentUsage: null, quota: null };
+const state = { chatId: null, chats: [], datasets: [], memories: [], busy: false, modal: null, editingMemory: null, thinkingOpen: localStorage.getItem('thinkingOpen') === 'true', personalKey: sessionStorage.getItem('byteApiKey')||'', keyMode: sessionStorage.getItem('byteKeyMode')||'server', serverKeyReady: false, currentUsage: null, quota: null, lastApiAt: 0 };
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const icon = (name) => `<svg class="ui-icon" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
 
+async function fetchWithWake(path, options = {}) {
+  let showingWake = false;
+  const mayBeSleeping = state.lastApiAt && Date.now() - state.lastApiAt > 14 * 60 * 1000 && $('boot-screen').classList.contains('hidden');
+  const wakeTimer = mayBeSleeping ? setTimeout(() => { showingWake = true; showBoot('Waking the analysis engine…', 'Render rests after 15 minutes without visitors. This can take about a minute.'); }, 3500) : null;
+  try {
+    const response = await fetch(path, { credentials: 'same-origin', ...options });
+    state.lastApiAt = Date.now();
+    return response;
+  } finally {
+    if (wakeTimer) clearTimeout(wakeTimer);
+    if (showingWake) hideBoot();
+  }
+}
 async function api(path, options = {}) {
-  const response = await fetch(path, { credentials: 'same-origin', ...options });
+  const response = await fetchWithWake(path, options);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
   return data;
 }
 function json(method, body) { return { method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }; }
 function toast(message) { const node = $('toast'); node.textContent = message; node.classList.remove('hidden'); clearTimeout(toast.timer); toast.timer = setTimeout(() => node.classList.add('hidden'), 3600); }
+function showBoot(title, message) { $('boot-title').textContent = title; $('boot-message').textContent = message; $('boot-retry').classList.add('hidden'); $('boot-screen').classList.remove('hidden'); }
+function hideBoot() { $('boot-screen').classList.add('hidden'); }
+function bootError(message) { $('boot-title').textContent = 'Could not connect yet.'; $('boot-message').textContent = message; $('boot-retry').classList.remove('hidden'); $('boot-screen').classList.remove('hidden'); }
 function scrollBottom() { const el = $('conversation'); el.scrollTop = el.scrollHeight; }
 function closeSidebar() { $('sidebar').classList.remove('open'); $('mobile-backdrop').classList.remove('open'); }
 function emptyUsage(){return {model:'gpt-4.1',input_tokens:0,output_tokens:0,cached_tokens:0,context_tokens:0,context_window:1047576,calls:0};}
@@ -148,7 +164,7 @@ async function sendMessage(text) {
     pending.querySelector('.answer').innerHTML='<span class="loading-dots"><i></i><i></i><i></i></span>';
     scrollBottom(); let activity=[], gotFinal=false;const baseUsage=state.currentUsage||emptyUsage();
     const options=json('POST',{content:question});if(state.keyMode==='personal'&&state.personalKey)options.headers['X-OpenAI-API-Key']=state.personalKey;
-    const response=await fetch(`/api/chats/${state.chatId}/messages`,{...options,credentials:'same-origin'});
+    const response=await fetchWithWake(`/api/chats/${state.chatId}/messages`,options);
     if(!response.ok){const data=await response.json().catch(()=>({}));if(response.status===429){state.quota={limit:10,used:10,remaining:0};updateKeyUI();}throw new Error(data.detail||'Could not send message');}
     const remaining=response.headers.get('X-Workspace-Prompts-Remaining');if(remaining!==null){state.quota={limit:10,used:10-Number(remaining),remaining:Number(remaining)};updateKeyUI();}
     const reader=response.body.getReader(), decoder=new TextDecoder(); let buffer='';
@@ -195,7 +211,7 @@ async function uploadFile(file) {
       const chunkSize=3*1024*1024;let seq=0;
       for(let offset=0;offset<file.size;offset+=chunkSize){
         const chunk=file.slice(offset,offset+chunkSize);
-        const response=await fetch(`/api/uploads/${session.id}/chunks/${seq++}`,{method:'PUT',body:chunk,credentials:'same-origin'});
+        const response=await fetchWithWake(`/api/uploads/${session.id}/chunks/${seq++}`,{method:'PUT',body:chunk});
         if(!response.ok){const problem=await response.json().catch(()=>({}));throw new Error(problem.detail||'Upload failed');}
         $('attachment-hint').textContent=`Uploading ${file.name} · ${Math.min(100,Math.round((offset+chunk.size)/file.size*100))}%`;
       }
@@ -217,11 +233,14 @@ function closeModal(restoreFocus=true){['memory-modal','datasets-modal','memory-
 function openMemoryEditor(item=null){state.editingMemory=item?.id||null;$('editor-heading').textContent=item?'Edit memory':'Add memory';$('memory-category').value=item?.category||'definition';$('memory-key').value=item?.key||'';$('memory-value').value=item?.value||'';$('memory-scope').innerHTML='<option value="">All datasets</option>'+state.datasets.map(d=>`<option value="${esc(d.name)}">${esc(d.name)}</option>`).join('');$('memory-scope').value=item?.scope||'';openModal('memory-editor');}
 
 async function initialize(){
-  try{const status=await api('/api/status');if(!status.ready){$('login-screen').classList.remove('hidden');$('login-screen').querySelector('p').textContent=`Server setup required: ${status.missing.join(', ')}`;return;}
-    if(!status.authenticated){$('login-screen').classList.remove('hidden');return;}
-    $('login-screen').classList.add('hidden');state.serverKeyReady=status.chat_ready;state.quota=status.workspace_quota;updateKeyUI();await Promise.all([refreshChats(),refreshDatasets(),refreshMemories()]);newChat();
+  showBoot('Opening your workspace.', 'Connecting to the analysis engine…');
+  const wakeTimer=setTimeout(()=>$('boot-message').textContent='The analysis engine is waking up. This can take about a minute after a quiet period.',4000);
+  try{const status=await api('/api/status');if(!status.ready){$('login-screen').classList.remove('hidden');$('login-screen').querySelector('p').textContent=`Server setup required: ${status.missing.join(', ')}`;hideBoot();return;}
+    if(!status.authenticated){$('login-screen').classList.remove('hidden');hideBoot();return;}
+    $('login-screen').classList.add('hidden');$('logout').classList.toggle('hidden',!!status.public_access);state.serverKeyReady=status.chat_ready;state.quota=status.workspace_quota;updateKeyUI();await Promise.all([refreshChats(),refreshDatasets(),refreshMemories()]);newChat();hideBoot();
     if(!status.chat_ready&&!state.personalKey)toast('Add your OpenAI API key in API key settings to enable chat.');
-  }catch(err){toast(err.message);}
+  }catch(err){bootError('The service may still be starting. Try again in a moment.');}
+  finally{clearTimeout(wakeTimer);}
 }
 
 $('composer').addEventListener('submit',e=>{e.preventDefault();sendMessage($('prompt').value);});
@@ -246,6 +265,7 @@ $('use-server-key').onclick=()=>{if(!state.serverKeyReady){toast('No workspace A
 $('use-personal-key').onclick=()=>{if(state.personalKey){state.keyMode='personal';sessionStorage.setItem('byteKeyMode','personal');updateKeyUI();toast('Using your key');}else $('personal-key').focus();};
 $('clear-key').onclick=()=>{state.personalKey='';state.keyMode='server';sessionStorage.removeItem('byteApiKey');sessionStorage.setItem('byteKeyMode','server');$('personal-key').value='';updateKeyUI();toast('Personal key removed');};
 $('logout').onclick=async()=>{sessionStorage.removeItem('byteApiKey');sessionStorage.removeItem('byteKeyMode');await api('/api/auth/logout',{method:'POST'}).catch(()=>{});location.reload();};
+$('boot-retry').onclick=initialize;
 $('thinking-toggle').onclick=()=>{state.thinkingOpen=!state.thinkingOpen;localStorage.setItem('thinkingOpen',String(state.thinkingOpen));document.querySelectorAll('.thinking').forEach(el=>el.open=state.thinkingOpen);updateThinkingToggle();toast(state.thinkingOpen?'Thinking steps shown':'Thinking steps hidden');};
 $('menu-toggle').onclick=()=>{$('sidebar').classList.add('open');$('mobile-backdrop').classList.add('open');};$('mobile-backdrop').onclick=closeSidebar;
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('action-dialog').open){closeModal();closeSidebar();}if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();newChat();}if(e.key==='Tab'&&state.modal&&!$('action-dialog').open){const items=[...$(state.modal).querySelectorAll('button,input,textarea,select,[tabindex]')].filter(el=>!el.disabled&&el.getClientRects().length);if(items.length){const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}});

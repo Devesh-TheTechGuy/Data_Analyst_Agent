@@ -15,5 +15,6 @@ output/*.png
 agent_memory.json
 app_state.sqlite3
 .vercel/
+.test-tmp/
 # Local datasets added by the user (tracked example CSVs remain tracked)
 data/*
