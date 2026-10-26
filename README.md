@@ -6,7 +6,7 @@ The app uses **GPT-4.1** for the main conversation, with pandas, DuckDB, SciPy, 
 
 ## What you can do
 
-- **Add a dataset without editing Python.** Files in `data/` are discovered automatically. The plus button in chat also uploads a file.
+- **Add a dataset without editing Python.** Files in `data/` are discovered automatically. The plus button or dropping a file over chat also uploads it.
 - **Ask questions in plain English.** The agent inspects columns and calls the right tool to calculate, query, test, or visualize the data.
 - **See how an answer was made.** The collapsible Thinking section shows visible tool activity, while the final answer has its own space. It does not expose private model reasoning.
 - **Continue a conversation.** Chats, uploaded files, charts, and useful memories persist in the app database.
