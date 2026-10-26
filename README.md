@@ -1,89 +1,119 @@
-# Glassboard Data Analyst
+# BYTE into Data
 
-A conversational data analysis app built with FastAPI, OpenAI tool calling, pandas, DuckDB, SciPy, scikit-learn, and a responsive glass themed interface. It retains the seven original analysis tools and adds automatic dataset discovery, web uploads, persistent chats, and editable, relevant memory.
+I built **BYTE into Data** for the [AI Agent challenge](AI%20Agent%20requirements.txt). It started as a terminal project where the model had to call data tools before answering. I wanted to make that workflow easier to use: now I can drop a file into `data/` or upload it in the browser, ask a question, and see the actual analysis steps behind the answer.
 
-## Run locally
+The app uses **GPT-4.1** for the main conversation, with pandas, DuckDB, SciPy, scikit-learn, Matplotlib, and Seaborn for the analysis. I kept the seven original tools and added a web interface, saved chats, automatic memory, and token usage details.
 
-Use Python 3.12. In PowerShell from this folder:
+## What you can do
+
+- **Add a dataset without editing Python.** Files in `data/` are discovered automatically. The plus button in chat also uploads a file.
+- **Ask questions in plain English.** The agent inspects columns and calls the right tool to calculate, query, test, or visualize the data.
+- **See how an answer was made.** The collapsible Thinking section shows visible tool activity, while the final answer has its own space. It does not expose private model reasoning.
+- **Continue a conversation.** Chats, uploaded files, charts, and useful memories persist in the app database.
+- **Keep useful context.** The app can save definitions and preferences from normal conversation, select relevant memories for a later question, and let me edit them from the Memory icon.
+- **Track API use.** The bar below chat shows input and output tokens, the latest prompt size against the GPT-4.1 context window, and the measured prompt cache hit rate.
+- **Use your own API key.** GPT-4.1 can run with the workspace key or a key entered in the API key panel. The workspace key allows 10 prompts per browser; a personal key does not use that allowance.
+
+The interface uses a dark black and gold theme. I designed it around the same workflow I use when exploring a new dataset: pick a file, ask a question, check the tool steps, and follow up.
+
+## Try it locally
+
+I used Python 3.12. Open PowerShell in the project folder:
 
 ```powershell
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 Copy-Item .env.example .env
+notepad .env
 ```
 
-Set `OPENAI_API_KEY` in `.env`. For a private local workspace, also set `APP_PASSWORD`. Then run:
+Put your OpenAI key in `.env` as `OPENAI_API_KEY`. You can also leave the workspace key unset and enter your own key in the web app. For a password protected local workspace, set `APP_PASSWORD` too. Then start the server:
 
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app:app --reload
 ```
 
-Open `http://127.0.0.1:8000`. The terminal chat remains available with `.\.venv\Scripts\python.exe core.py`.
+Open **http://127.0.0.1:8000**. The terminal version is still available with `.\.venv\Scripts\python.exe core.py`.
 
-## Datasets
+On macOS or Linux, create the environment with `python3 -m venv .venv`, install with `.venv/bin/python -m pip install -r requirements.txt`, and run `.venv/bin/python -m uvicorn app:app --reload`.
 
-Put a tabular file in `data/` and refresh the dataset list. No Python edits or restart are needed. Files are discovered before each question as well. The filename becomes a lowercase SQL safe dataset name (`Quarterly Sales.xlsx` → `quarterly_sales`); collisions get `_2`, `_3`, and so on. Dataset names are shown in the interface and passed to the agent. The first sheet of an Excel workbook is used.
+## Add a dataset
 
-The plus button and Datasets dialog also upload files. Supported extensions: `.csv`, `.tsv`, `.txt`, `.xlsx`, `.xls`, `.xlsm`, `.ods`, `.json`, `.jsonl`, `.ndjson`, `.parquet`, and `.feather`. Web uploads are stored in the app database, including on Vercel. Files up to 50 MB use chunked requests. For larger files, add them to `data/` locally or use a separate data service. Only upload data you are authorized to analyze.
+Put a supported file into `data/` and refresh the Datasets list. The app also checks the folder before each question, so a new file does not need a code edit or server restart. The filename becomes a safe dataset and SQL table name: `Quarterly Sales.xlsx` becomes `quarterly_sales`. If two files produce the same name, the next one gets `_2`.
 
-Example prompts:
+The plus button in chat and the Datasets panel upload files into the app database. Supported formats are **CSV, TSV, TXT, XLSX, XLS, XLSM, ODS, JSON, JSONL, NDJSON, Parquet, and Feather**. Excel loading currently uses the first sheet. Browser uploads are limited to 50 MB and use chunks for larger requests.
 
-- “Inspect `titanic_dataset` and summarize missing values.”
-- “What is the survival rate by passenger class?”
-- “Create an age distribution chart.”
-- “In this project, an active customer means one with an order in the past 30 days.”
+The repository includes Titanic and Melbourne housing CSVs for trying the project. For example:
 
-## Memory
+> Inspect `titanic_dataset`. What columns have missing values?
+>
+> What was the survival rate by passenger class?
+>
+> Make a chart of passenger ages.
 
-After a completed answer, a second small model pass reviews recent conversation context for durable user supplied facts. It can save multiple definitions, metric rules, preferences, project details, and useful profile context without requiring the word “remember.” Ordinary questions, transient instructions, assistant guesses, raw datasets, and secrets should not be saved. Corrections update a matching fact. The Memory dialog lets you inspect, add, edit, or delete entries directly.
+The agent gets the available dataset names with each question, so I can ask about a file I just added. It should use tool output for counts and calculations instead of guessing them.
 
-Before each answer, a relevance pass selects only memories useful for the current question. Dataset scoped memories are filtered by the dataset named in the question. Selected memories guide the agent but do not replace tool evidence. The old `agent_memory.json`, if present, is imported once into the local database.
+## The seven analysis tools
 
-SQLite stores local chats, memories, uploads, and chart images in `app_state.sqlite3` (ignored by Git). On Vercel, set `DATABASE_URL` or `POSTGRES_URL` to a Postgres database. Uploaded files and charts are stored there, so they survive function restarts. The app uses one workspace protected by `APP_PASSWORD`; it is designed for a single owner or a small group sharing that password, not separate user accounts.
-
-## Interface
-
-The dark, black and gold web UI includes persistent conversations, search, rename and delete, dataset upload, memory management, suggested prompts, copy answer, responsive layout, and a separate collapsible **Thinking** panel. The panel streams visible analysis steps and tool results while the final answer remains separate. It does not show private model chain of thought. Charts generated by the agent are saved and shown inline in answers.
-
-The bottom meter shows actual input and output token usage, latest GPT-4.1 prompt size against its 1,047,576 token context window, and cache hit rate (`cached input tokens / input tokens`). Usage includes the memory selection and extraction calls, which use GPT-4.1-mini. Prompt caching is enabled automatically by OpenAI for GPT-4.1. The app keeps a stable instruction prefix and cache key, and records the cached token counts returned by the API. A cache hit is measured rather than promised.
-
-In **API key** settings, choose the deployment's workspace key or enter your own OpenAI key. Your key stays in the current browser tab's session storage and is sent to this app server over the chat request, then to OpenAI. It is not stored in the app database. The main analyst uses GPT-4.1 for either choice. Clear the key with **Remove my key** or by signing out.
-
-## Analysis tools
-
-| Tool | Purpose |
+| Tool | What I use it for |
 | --- | --- |
-| `inspect_dataset` | Exact columns, types, missing values, samples, and summary statistics |
-| `calculate` | Restricted arithmetic and math functions |
-| `sql_query` | Read only DuckDB queries over named datasets |
-| `statistical_test` | Correlation, t-test, chi-square, ANOVA, IQR, z-scores, and matrices |
-| `generate_chart` | Histograms, bars, scatter, lines, heatmaps, and other charts |
-| `data_quality` | Formatting checks and drift comparisons |
-| `forecast` | Correlation discovery and linear regression |
+| `inspect_dataset` | Check row count, columns, types, missing values, and sample rows. |
+| `calculate` | Evaluate a restricted arithmetic expression. |
+| `sql_query` | Query loaded tables with read only DuckDB SQL. |
+| `statistical_test` | Run correlation, t-test, chi-square, ANOVA, IQR, z-scores, or a correlation matrix. |
+| `generate_chart` | Create a histogram, scatter plot, bar chart, heatmap, and other charts. |
+| `data_quality` | Check formatting issues and compare data for drift. |
+| `forecast` | Find correlations or fit a linear regression. The name comes from the original project; it is not a time-series forecaster. |
 
-See [tool_usage_guide.md](tool_usage_guide.md) for the full tool parameter guide. SQL external file access is disabled; arithmetic uses an AST allowlist rather than `eval`.
+The model receives the schemas in [json_schema.py](json_schema.py). [tool_usage_guide.md](tool_usage_guide.md) documents the arguments and examples. The agent calls a tool, reads its result, and can call another before writing the final answer. Chart images appear in the conversation when chart generation succeeds.
+
+## How memory works
+
+Memory is separate from chat history. After an answer, a small GPT-4.1-mini pass reviews the recent conversation and existing memories for reusable facts supplied by the user. It can save more than one item from a turn, even when I never type “remember.” Examples include a metric definition, a column meaning, a project detail, or a preference. A correction can update an earlier item.
+
+Before a new answer, another pass chooses only memories relevant to that question. A fact can also be scoped to a dataset. I can inspect, add, edit, or delete memory entries with the **Memory** icon. Saved memory guides the agent; it does not replace evidence from the dataset tools.
+
+For example, if I say “An active customer means someone who ordered in the last 30 days,” that definition can be saved. A later question about active customers can use it. If I change the definition to 60 days, I can correct it in chat or edit the saved entry directly.
+
+## How the app is put together
+
+```text
+app.py             FastAPI routes, sign-in, uploads, and streamed chat events
+core.py            GPT-4.1 tool loop and terminal chat
+datasets.py        Automatic folder discovery and uploaded dataset loading
+memory.py          Automatic memory updates and relevant recall
+storage.py         SQLite locally or Postgres on Vercel
+tools.py           Tabular file readers and the seven analysis tools
+json_schema.py     Tool definitions sent to the model
+usage.py           Token, context, and cache accounting
+static/            Web interface
+data/              Automatically discovered local datasets
+tests/             Workflow checks
+```
+
+I wrote the tool loop, data loading, tool schemas, memory flow, storage layer, and web interface. OpenAI provides the models; the calculations run through the Python tools. Locally, SQLite keeps chats, uploads, charts, and memories in `app_state.sqlite3`. The old `agent_memory.json`, if present, is imported once.
+
+The web app is a **single shared workspace** protected by `APP_PASSWORD`. It does not have separate user accounts. A signed browser cookie tracks the 10-prompt allowance for the workspace key. Clearing browser data creates a new browser identity, so this is a practical usage limit rather than a separate account system. A personal OpenAI key stays in the current browser tab's session storage, is sent through the app server for the request, and is not saved in the app database. The workspace API key stays on the server and is never displayed or sent to the browser.
 
 ## Deploy on Vercel
 
-1. Connect this repository to a Vercel project or deploy with the [Vercel CLI](https://vercel.com/docs/frameworks/backend/fastapi). The root `app.py` is the FastAPI entrypoint, and `vercel.json` sets a 300 second function duration.
-2. Provision a Postgres integration in the [Vercel Marketplace](https://vercel.com/docs/postgres) and expose its connection string as `DATABASE_URL` (or `POSTGRES_URL`).
-3. Set `OPENAI_API_KEY`, `APP_PASSWORD`, and optionally `SESSION_SECRET` as Vercel environment variables. Do not put them in Git. The personal key option also works when no workspace API key is configured, but `APP_PASSWORD` is still required for the shared workspace.
-4. Deploy and check `/api/status`, then sign in through the web page and test an uploaded dataset. A missing database or password produces a setup message instead of silently losing data.
+The root `app.py` is the Vercel FastAPI entry point, and [vercel.json](vercel.json) contains the function settings. To deploy this repository:
 
-Vercel limits a single function request to [4.5 MB](https://vercel.com/docs/functions/limitations), so the browser sends larger files in 3 MB chunks. The function bundle contains scientific Python packages. New Vercel projects are enrolled in [Large Functions](https://vercel.com/changelog/vercel-functions-can-now-be-up-to-5-gb-in-package-size); an older project may need `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` in its environment. Files placed in `data/` after deployment need a redeploy; the web uploader is the live path for new cloud datasets.
+1. Import it into Vercel.
+2. Add a Postgres database and set `DATABASE_URL` (or `POSTGRES_URL`). Vercel functions need persistent storage for chats, memories, uploads, and charts.
+3. Set `APP_PASSWORD` and either `OPENAI_API_KEY` for a workspace key or use the personal key option in the app. `SESSION_SECRET` is an optional separate secret for signing the login cookie.
+4. Deploy, check `/api/status`, sign in, and try an upload.
 
-## Project structure
+Files added to `data/` in the repository appear after a redeploy. For a live deployment, the browser uploader is the way to add a dataset immediately. Keep `.env`, database credentials, and API keys out of Git.
 
-```text
-app.py             FastAPI routes, authentication, streamed chat events
-core.py            Agent loop and terminal chat
-datasets.py        Folder discovery, naming, and uploaded dataset loading
-memory.py          Memory extraction and relevant recall
-storage.py         SQLite/Postgres persistence
-tools.py           Seven analysis tools and tabular readers
-json_schema.py     Tool definitions sent to the model
-static/            Glassboard web interface
-data/              Automatically discovered local datasets
+## Checks and next steps
+
+I run the workflow tests with:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-The two included CSVs are example datasets. Verify their source and license before redistributing them in a public deployment.
+The tests cover dataset discovery and uploads, memory changes and selection, tool safety, API behavior, the workspace prompt limit, and token accounting. I also tested a real GPT-4.1 question against the included Titanic data: the agent inspected the dataset and returned its **891 rows** from the tool result.
+
+Next I want to add Excel sheet selection, support for larger browser uploads, and separate accounts if the project grows beyond one workspace. Right now it gives me a complete flow from uploading a file to checking a grounded answer.

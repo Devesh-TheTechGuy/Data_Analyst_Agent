@@ -74,6 +74,7 @@ def init():
             sql(con, f"CREATE TABLE IF NOT EXISTS charts (id TEXT PRIMARY KEY, content {blob} NOT NULL, created_at TEXT NOT NULL)")
             sql(con, "CREATE TABLE IF NOT EXISTS upload_sessions (id TEXT PRIMARY KEY, filename TEXT NOT NULL, size_bytes INTEGER NOT NULL, created_at TEXT NOT NULL)")
             sql(con, f"CREATE TABLE IF NOT EXISTS upload_chunks (upload_id TEXT NOT NULL, seq INTEGER NOT NULL, content {blob} NOT NULL, PRIMARY KEY (upload_id, seq))")
+            sql(con, "CREATE TABLE IF NOT EXISTS workspace_quota (device_id TEXT PRIMARY KEY, used INTEGER NOT NULL DEFAULT 0)")
             sql(con, "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         _ready = True
         with connection() as con:
@@ -155,6 +156,25 @@ def update_message_usage(message_id, usage):
     init()
     with connection() as con:
         sql(con, "UPDATE messages SET usage_json=? WHERE id=?", (json.dumps(usage), message_id))
+
+
+def workspace_quota(device_id, limit=10):
+    init()
+    with connection() as con:
+        row = sql(con, "SELECT used FROM workspace_quota WHERE device_id=?", (device_id,)).fetchone()
+    used = row["used"] if row else 0
+    return {"limit": limit, "used": used, "remaining": max(0, limit - used)}
+
+
+def consume_workspace_prompt(device_id, limit=10):
+    """Atomically reserve one server-key prompt for a signed browser device."""
+    init()
+    with connection() as con:
+        row = sql(con, "INSERT INTO workspace_quota (device_id, used) VALUES (?, 1) "
+                       "ON CONFLICT (device_id) DO UPDATE SET used=workspace_quota.used+1 "
+                       "WHERE workspace_quota.used < ? RETURNING used", (device_id, limit)).fetchone()
+    used = row["used"] if row else limit
+    return {"limit": limit, "used": used, "remaining": max(0, limit - used), "allowed": row is not None}
 
 
 def list_memories():

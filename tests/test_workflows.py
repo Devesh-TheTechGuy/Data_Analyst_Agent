@@ -156,6 +156,29 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(client.post("/api/auth/login", json={"password":"test-password"}).status_code, 200)
             self.assertEqual(client.get("/api/chats").status_code, 200)
 
+    def test_workspace_key_has_ten_prompts_per_browser(self):
+        with patch.dict(os.environ, {"APP_PASSWORD":"", "OPENAI_API_KEY":"owner-test-secret"}):
+            client = TestClient(app.app)
+            status = client.get("/api/status")
+            self.assertEqual(status.json()["workspace_quota"]["remaining"], 10)
+            self.assertNotIn("owner-test-secret", status.text)
+            chat_id = client.post("/api/chats", json={"title":"New analysis"}).json()["id"]
+            result = {"answer":"Two rows.", "activity":[], "usage":{}}
+            with patch.object(app.core, "run_agent", return_value=result), patch.object(app.memory, "auto_extract_and_save", return_value=[]):
+                for remaining in range(9, -1, -1):
+                    response = client.post(f"/api/chats/{chat_id}/messages", json={"content":"Count rows"})
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.headers["X-Workspace-Prompts-Remaining"], str(remaining))
+                blocked = client.post(f"/api/chats/{chat_id}/messages", json={"content":"One more"})
+                self.assertEqual(blocked.status_code, 429)
+                self.assertEqual(client.get("/api/status").json()["workspace_quota"]["remaining"], 0)
+                personal = client.post(f"/api/chats/{chat_id}/messages", json={"content":"Using my key"},
+                                       headers={"X-OpenAI-API-Key":"sk-personal-test"})
+                self.assertEqual(personal.status_code, 200)
+                self.assertNotIn("X-Workspace-Prompts-Remaining", personal.headers)
+            another_browser = TestClient(app.app)
+            self.assertEqual(another_browser.get("/api/status").json()["workspace_quota"]["remaining"], 10)
+
     def test_math_and_sql_are_restricted(self):
         self.assertEqual(calculate("sqrt(144) + 2"), "14.0")
         self.assertIn("Only arithmetic", calculate("().__class__"))

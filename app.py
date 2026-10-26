@@ -5,6 +5,7 @@ import hmac
 import json
 import os
 import queue
+import secrets
 import threading
 from pathlib import Path
 
@@ -24,7 +25,7 @@ import storage
 from tools import DATASET, SUPPORTED_EXTENSIONS
 from usage import UsageTracker
 
-app = FastAPI(title="Glassboard Data Analyst")
+app = FastAPI(title="BYTE into Data")
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
@@ -49,14 +50,34 @@ def is_authenticated(request):
     return not password or hmac.compare_digest(request.cookies.get("glassboard_session", ""), session_token())
 
 
+def browser_device(request):
+    """Identify a browser without exposing the workspace API key to the client."""
+    secret = (os.getenv("SESSION_SECRET") or os.getenv("APP_PASSWORD") or "local-only").encode()
+    raw = request.cookies.get("byte_device", "")
+    device_id, separator, signature = raw.partition(".")
+    if separator and len(device_id) == 32 and all(ch in "0123456789abcdef" for ch in device_id):
+        expected = hmac.new(secret, device_id.encode(), hashlib.sha256).hexdigest()
+        if hmac.compare_digest(signature, expected):
+            return device_id, None
+    device_id = secrets.token_hex(16)
+    signature = hmac.new(secret, device_id.encode(), hashlib.sha256).hexdigest()
+    return device_id, f"{device_id}.{signature}"
+
+
 @app.middleware("http")
 async def guard(request: Request, call_next):
+    device_id, new_cookie = browser_device(request)
+    request.state.device_id = device_id
     if request.url.path.startswith("/api/") and request.url.path not in {"/api/status", "/api/auth/login"}:
         if configured():
             return JSONResponse({"detail": "Server setup required: " + ", ".join(configured())}, status_code=503)
         if not is_authenticated(request):
             return JSONResponse({"detail": "Sign in to continue"}, status_code=401)
-    return await call_next(request)
+    response = await call_next(request)
+    if new_cookie:
+        response.set_cookie("byte_device", new_cookie, httponly=True, secure=bool(os.getenv("VERCEL")),
+                            samesite="lax", max_age=60 * 60 * 24 * 365)
+    return response
 
 
 @app.get("/")
@@ -67,7 +88,8 @@ def home():
 @app.get("/api/status")
 def status(request: Request):
     return {"ready": not configured(), "missing": configured(), "authenticated": is_authenticated(request),
-            "chat_ready": bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API"))}
+            "chat_ready": bool(os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API")),
+            "workspace_quota": storage.workspace_quota(request.state.device_id) if not configured() else None}
 
 
 class LoginBody(BaseModel):
@@ -208,6 +230,11 @@ def send_message(chat_id: str, body: MessageBody, request: Request):
         raise HTTPException(400, "API key is too long")
     if not (personal_key or os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API")):
         raise HTTPException(503, "Add your API key in Settings or set OPENAI_API_KEY on the server")
+    quota = None
+    if not personal_key:
+        quota = storage.consume_workspace_prompt(request.state.device_id)
+        if not quota["allowed"]:
+            raise HTTPException(429, "This browser has used its 10 workspace prompts. Add your own API key to continue.")
     previous = [{"role": m["role"], "content": m["content"]} for m in chat["messages"]]
     question = body.content.strip()
     storage.add_message(chat_id, "user", question)
@@ -244,7 +271,10 @@ def send_message(chat_id: str, body: MessageBody, request: Request):
             kind, payload = event
             yield f"event: {kind}\ndata: {json.dumps(payload, default=str)}\n\n"
 
-    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    if quota is not None:
+        headers["X-Workspace-Prompts-Remaining"] = str(quota["remaining"])
+    return StreamingResponse(stream(), media_type="text/event-stream", headers=headers)
 
 
 @app.get("/api/memories")

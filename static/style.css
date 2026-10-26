@@ -18,3 +18,5 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,
 @media(max-width:480px){.top-title strong{max-width:125px}.top-pill{font-size:10px;padding:7px}.top-memory,#thinking-toggle{display:none}.welcome h1{font-size:34px}.suggestions{grid-template-columns:1fr}.suggestion{min-height:65px;display:flex;align-items:center;gap:10px}.suggest-icon{margin:0}.suggestion small{display:none}.message{margin:22px 0}.user-bubble{max-width:92%}.modal{padding:18px}.modal-head h2{font-size:23px}.usage-bar{display:grid;grid-template-columns:1fr 1fr;width:100%;gap:3px 8px;justify-items:center;font-size:10px}.usage-bar span+span{padding-left:0;border:0}}
 @media(max-width:480px) and (max-height:600px){.welcome{justify-content:flex-start;padding:32px 5px 20px}.welcome-mark{width:46px;height:46px;margin-bottom:16px}.welcome p{margin:11px 0 20px}.loaded-strip{margin-top:20px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+.brand{font-size:19px;letter-spacing:-.7px;white-space:nowrap}
+.brand strong{color:var(--gold-light);font-weight:780}
