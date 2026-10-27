@@ -119,35 +119,46 @@ The dataset tables are **in memory** for the running process. They are loaded ag
 
 ## Using another dataset
 
-`load_data()` supports `.csv`, `.txt`, `.tsv`, `.xlsx`, `.xls`, `.json`, and `.parquet`. Put your file in `data/`, then add a top-level line beside the existing examples in `core.py`:
+Put your file in the `data/` folder and restart. Every supported file there (`.csv`, `.txt`, `.tsv`, `.xlsx`, `.xls`, `.json`, `.parquet`) is loaded automatically at startup by `load_folder()` in `core.py`.
+
+The dataset name, which is also its SQL table name, comes from the filename, lowercased and cleaned for SQL. For example, `data/Titanic_Dataset.csv` becomes `titanic_dataset`.
+
+To use a custom name, call `load_data` manually in `core.py`:
 
 ```python
 load_data("data/sales.csv", "sales")
 ```
 
-Now you can ask about the `sales` dataset, and its SQL table name is also `sales`. If you leave out the second argument, the table name is derived from the filename and cleaned for SQL. You can remove the two example `load_data(...)` lines if you want to run only your data. At present there is no interactive file upload or command-line dataset argument; registering a new file requires editing these startup lines. Do not commit a private dataset to a public repository.
+Files in unsupported formats are skipped, and a file that is empty or unreadable raises an error at startup. There is no interactive file upload yet, so new files are picked up on restart. Do not commit a private dataset to a public repository.
+
 
 ## Memory: what works now
 
-I added memory in `memory.py` to try the challenge's optional mission. After each answer, `chat()` calls `auto_extract_and_save(user_question, agent_answer, client)`. This makes **an additional `gpt-4.1` API call** asking whether that turn contains one reusable definition, filter, column meaning, or preference. If it gets a valid item, `remember()` writes it to the local `agent_memory.json` file under `definitions` or `preferences` and prints `[Persistent Memory Updated]`.
+I added memory in `memory.py` to try the challenge's optional mission. After each answer, `chat()` calls `auto_extract_and_save(user_question, agent_answer, client)`. This makes **an additional `gpt-4.1` API call** asking whether that turn contains any reusable definition, filter, column meaning, or preference. Every valid item found is written by `remember()` to the local `agent_memory.json` file under `definitions` or `preferences`, and `[Memory updated]` is printed for each one.
 
-For example, telling the agent “For this analysis, wealthy traveler means `Pclass = 1 AND Fare > 100`” may save a definition. On the next question or the next program run, `format_memory_for_prompt()` reads the JSON file and places the saved definition in the system prompt. At startup, `chat()` also prints any saved definitions and preferences, which is a quick way to check that the file was read.
+For example, telling the agent "For this analysis, wealthy traveler means `Pclass = 1 AND Fare > 100`" may save a definition. On the next question or the next program run, `format_memory_for_prompt()` reads the JSON file and places the saved definitions and preferences in the system prompt. At startup, `chat()` also prints any saved entries, which is a quick way to check that the file was read.
 
 This is different from normal chat history: chat history contains the conversation from the current run and disappears when the program exits; `agent_memory.json` stays on your computer. It is ignored by Git, so someone who clones this repository starts with empty memory.
 
-To check memory in three stages: (1) state a reusable definition and look for `[Persistent Memory Updated]` plus a new entry in `agent_memory.json`; (2) restart `core.py` and check that the definition appears under “REMEMBERED FROM EARLIER SESSIONS”; (3) ask a question using that definition and inspect the printed tool call to see whether the model actually included the saved condition. The first stage tests extraction, the second tests persistence, and the third tests whether memory changed the analysis. Passing one stage does not guarantee the next one.
+To check memory in three stages: (1) state a reusable definition and look for `[Memory updated]` plus a new entry in `agent_memory.json`; (2) restart `core.py` and check that the definition appears under "REMEMBERED FROM EARLIER SESSIONS"; (3) ask a question using that definition and inspect the printed tool call to see whether the model actually included the saved condition. The first stage tests extraction, the second tests persistence, and the third tests whether memory changed the analysis. Passing one stage does not guarantee the next one.
+
+### Reliability features
+
+- **Several facts per turn:** if one message defines more than one term, all of them are saved.
+- **No invisible memories:** if the extractor returns an unknown category, the entry is saved under `definitions` so the prompt formatter always sees it.
+- **Safe saving:** memory is written to a temporary file and then swapped in, so a crash mid-write cannot corrupt `agent_memory.json`.
+- **Visible errors:** if the extraction call fails, or the memory file cannot be read, a warning is printed instead of failing silently. The chat itself never crashes because of memory.
 
 ### Why memory may appear not to work
 
-- A fact is saved only if the second model call detects it and returns valid JSON. Ordinary questions usually create no memory. Extraction errors are currently caught without an error message.
+- A fact is saved only if the second model call detects it and returns valid JSON. Ordinary questions such as "what is the mean age?" usually create no memory.
 - The code inserts **all** saved definitions and preferences into each new system prompt. It does not search for the most relevant fact or link a fact to a specific dataset.
 - A saved fact is guidance for the model; there is no code that automatically turns a definition into a SQL filter. The model still has to choose to apply it correctly.
-- Saving another item with the exact same category and key (case-insensitive) overwrites the old value. There is no deeper stale-fact or contradiction check.
-- There is no user command such as `show memory`, `forget`, or `correct`. To inspect local state, open `agent_memory.json` in an editor. It is a JSON object with `definitions` and `preferences`; you can edit or remove entries while the program is stopped.
-- If `agent_memory.json` is malformed or cannot be read, `load_memory()` currently falls back to empty memory without showing the reason.
-- The extractor can save a category other than `definitions` or `preferences`, but the prompt formatter only reads those two categories. Such an entry would stay in the JSON file without being used.
+- Saving another item with the same category and key (case-insensitive) overwrites the old value. There is no deeper stale-fact or contradiction check.
+- If `agent_memory.json` is malformed, a warning is printed and the program continues with empty memory. Fix or delete the file, otherwise the next save will overwrite it.
+- `memory.py` includes a `forget(key)` function, but it is not a user command yet. There is no `show memory`, `forget`, or `correct` command in the chat. To inspect or edit memory, open `agent_memory.json` in an editor while the program is stopped. It is a JSON object with `definitions` and `preferences`.
 
-These are the main gaps between this first version and the challenge's stronger memory goal of **relevant retrieval, reliable updates, conflict handling, and user control**. I would address them next with explicit memory commands, dataset-scoped facts, retrieval based on the current question, and tests that show a saved definition changes a later SQL query.
+These are the main gaps between this version and the challenge's stronger memory goal of **relevant retrieval, reliable updates, conflict handling, and user control**. I would address them next with explicit memory commands (wiring up `forget`), dataset-scoped facts, retrieval based on the current question, and tests that show a saved definition changes a later SQL query.
 
 ## What I built and what I would improve
 
@@ -155,7 +166,6 @@ My contribution was connecting the model's tool-calling loop to seven analysis f
 
 This is a learning project, with some important limits:
 
-- The program currently starts with two fixed example file paths. Loading a different file needs a code edit and a restart.
 - The memory feature persists facts but does not yet meet the full optional memory mission described above.
 - The system prompt and full conversation history are sent again for each question, which can increase token usage over a long session.
 - Chart images are saved locally, but the model only receives the path and cannot inspect the image it generated.
