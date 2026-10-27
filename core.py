@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import json
 import duckdb
 import pandas as pd
+from pathlib import Path
 from openai import OpenAI
 
 from tools import TOOLBOX, DATASET, load_data
@@ -13,9 +14,14 @@ import memory
 # =============================================================================
 # 1. LOAD YOUR DATASETS HERE  (manual, top level, outside every function)
 # =============================================================================
+SUPPORTED = {".csv", ".tsv", ".txt", ".xlsx", ".xls", ".json", ".parquet"}
 
-load_data("data/Titanic_Dataset.csv", "titanic")
-load_data("data/Melbourne_housing_FULL.csv")
+def load_folder(folder: str = "data"):
+    for f in sorted(Path(folder).iterdir()):
+        if f.suffix.lower() in SUPPORTED:
+            print(load_data(str(f)))
+
+load_folder()
 
 
 

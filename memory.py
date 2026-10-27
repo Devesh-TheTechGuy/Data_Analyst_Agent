@@ -2,89 +2,90 @@ import os
 import json
 
 MEMORY_FILE = "agent_memory.json"
+CATEGORIES = ("definitions", "preferences")
+
 
 def load_memory() -> dict:
-    """Loads saved definitions and preferences from disk."""
+    mem = {c: {} for c in CATEGORIES}
     if os.path.exists(MEMORY_FILE):
         try:
             with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {"definitions": {}, "preferences": {}}
+                mem.update(json.load(f))
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"⚠️ Could not read {MEMORY_FILE}: {e}")
+    return mem
 
-def save_memory(data: dict):
-    """Saves memory back to disk."""
-    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+
+def save_memory(data: dict) -> None:
+    tmp = MEMORY_FILE + ".tmp"              # write to temp file first so a crash can't corrupt memory
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, MEMORY_FILE)
+
 
 def remember(category: str, key: str, value: str) -> str:
-    """
-    Saves a definition or preference.
-    """
+    """Saves a definition or preference. Unknown categories fall back to 'definitions'."""
+    category = category if category in CATEGORIES else "definitions"
     mem = load_memory()
-    if category not in mem:
-        mem[category] = {}
     mem[category][key.strip().lower()] = value.strip()
     save_memory(mem)
     return f"Remembered: '{key}' in {category}."
 
-def format_memory_for_prompt() -> str:
-    """Formats saved memory to be injected into the system prompt."""
+
+def forget(key: str) -> str:
+    """Removes a saved entry from any category."""
+    key = key.strip().lower()
     mem = load_memory()
-    if not mem.get("definitions") and not mem.get("preferences"):
-        return "None."
-    
+    removed = False
+    for c in CATEGORIES:
+        if mem[c].pop(key, None) is not None:
+            removed = True
+    if removed:
+        save_memory(mem)
+        return f"Forgot '{key}'."
+    return f"Nothing saved under '{key}'."
+
+
+def format_memory_for_prompt() -> str:
+    mem = load_memory()
+    titles = {"definitions": "Domain Definitions", "preferences": "User Preferences"}
     lines = []
-    if mem.get("definitions"):
-        lines.append("Domain Definitions:")
-        for k, v in mem["definitions"].items():
-            lines.append(f"- '{k}': {v}")
-    if mem.get("preferences"):
-        lines.append("User Preferences:")
-        for k, v in mem["preferences"].items():
-            lines.append(f"- '{k}': {v}")
-    return "\n".join(lines)
+    for c in CATEGORIES:
+        if mem[c]:
+            lines.append(f"{titles[c]}:")
+            lines += [f"- '{k}': {v}" for k, v in mem[c].items()]
+    return "\n".join(lines) or "None."
+
 
 def auto_extract_and_save(user_msg: str, assistant_msg: str, client) -> None:
-    """
-    Silently extracts business rules, definitions, or preferences or anything that is told by the user to remember
-    from the conversation turn and saves them to agent_memory.json.
-    """
-    extraction_prompt = f"""You are a memory manager for a data analysis agent.
-Analyze this conversation turn and determine if the user established any reusable domain definition, column meaning, custom metric filter, or preference.
+    """Silently saves any reusable definitions/preferences the user stated this turn."""
+    prompt = f"""You are a memory manager for a data analysis agent.
+From the conversation turn, extract EVERY reusable domain definition, column meaning,
+custom metric, or user preference (or anything the user explicitly asked to remember).
+Ignore normal questions like 'what is the mean age?'.
 
-Examples of things to save:
-- "Active users means logins in the last 30 days > 0" -> category: "definitions", key: "active users", value: "logins_last_30d > 0"
-- "Churned means status = 'cancelled'" -> category: "definitions", key: "churned", value: "status == 'cancelled'"
-- "Always round currency to 2 decimals" -> category: "preferences", key: "currency_rounding", value: "2 decimals"
+Categories: "definitions" or "preferences" only.
 
-Conversation turn:
+Examples:
+- "Active users means logins in last 30 days > 0" -> {{"category": "definitions", "key": "active users", "value": "logins_last_30d > 0"}}
+- "Always round currency to 2 decimals" -> {{"category": "preferences", "key": "currency_rounding", "value": "2 decimals"}}
+
 User: {user_msg}
 Assistant: {assistant_msg}
 
-Instructions:
-If a reusable rule/definition was mentioned, return JSON:
-{{"found": true, "category": "definitions", "key": "exact term", "value": "concise rule"}}
-If NO rules/definitions were established (just normal questions like 'what is the mean age?'), return:
-{{"found": false}}
-Return RAW JSON ONLY.
-"""
+Return RAW JSON only: {{"items": [ ... ]}}  (use an empty list if nothing qualifies)"""
     try:
-        response = client.chat.completions.create(
+        resp = client.chat.completions.create(
             model="gpt-4.1",
-            messages=[{"role": "user", "content": extraction_prompt}],
+            messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
-            temperature=0.0
+            temperature=0.0,
         )
-        data = json.loads(response.choices[0].message.content)
-        if data.get("found"):
-            cat = data.get("category", "definitions")
-            key = data.get("key")
-            val = data.get("value")
+        items = json.loads(resp.choices[0].message.content).get("items", [])
+        for it in items:
+            key, val = it.get("key"), it.get("value")
             if key and val:
-                remember(cat, key, val)
-                print(f"\n🧠 [Persistent Memory Updated]: Remembered '{key}' -> {val}")
-    except Exception:
-        # Memory extraction should fail silently and never crash the main chat
-        pass
+                remember(it.get("category", "definitions"), key, val)
+                print(f"\n🧠 [Memory updated]: '{key}' -> {val}")
+    except Exception as e:
+        print(f"\n⚠️ Memory extraction failed: {e}")   # visible, but never crashes the chat
